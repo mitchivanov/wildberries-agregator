@@ -29,7 +29,7 @@ app = FastAPI(title="Goods Admin API", lifespan=lifespan)
 # Настройка CORS для работы с React на порту 3000
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Адрес React-приложения
+    allow_origins=["http://localhost:3000", "https://libertylib.ru"],  # Адрес React-приложения
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

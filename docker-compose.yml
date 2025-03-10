@@ -22,7 +22,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://socialist:revolution2023@postgres:5432/wb_aggregator
       BOT_TOKEN: 7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc
-      TELEGRAM_WEBAPP_URL: https://8f50-89-169-52-137.ngrok-free.app
+      TELEGRAM_WEBAPP_URL: https://libertylib.ru
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,16 +36,19 @@ services:
     build: ./admin/frontend
     ports:
       - "3000:80"
+    environment:
+      VITE_API_URL: https://libertylib.ru/api
     depends_on:
       - backend
     networks:
       - frontend-network
+      - backend-network
 
   bot:
     build: ./admin/bot
     environment:
       BOT_TOKEN: 7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc
-      WEBAPP_URL: https://8f50-89-169-52-137.ngrok-free.app
+      WEBAPP_URL: https://libertylib.ru
     networks:
       - backend-network
 
