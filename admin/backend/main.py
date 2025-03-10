@@ -42,7 +42,7 @@ app = FastAPI(title="Goods Admin API", lifespan=lifespan)
 # Добавляем CORS для обработки кросс-доменных запросов от ngrok
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Разрешаем все источники (для ngrok)
+    allow_origins=["https://develooper.online","https://develooper.ru", "https://www.develooper.online"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
