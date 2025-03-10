@@ -6,6 +6,10 @@ import CreateGoods from './pages/CreateGoods';
 import EditGoods from './pages/EditGoods';
 import { useTelegram } from './hooks/useTelegram';
 import { useEffect } from 'react';
+import Catalog from './pages/Catalog';
+import GoodsDetail from './pages/GoodsDetail';
+import AdminLogin from './pages/AdminLogin';
+import ProtectedRoute from './components/ProtectedRoute';
 
 console.log('=== Рендеринг App компонента ===');
 
@@ -36,10 +40,16 @@ function App() {
           }}
         />
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/goods" element={<GoodsPage />} />
-          <Route path="/goods/create" element={<CreateGoods />} />
-          <Route path="/goods/edit/:id" element={<EditGoods />} />
+          {/* Публичные маршруты */}
+          <Route path="/" element={<Catalog />} />
+          <Route path="/goods/:id" element={<GoodsDetail />} />
+          
+          {/* Маршруты админки */}
+          <Route path="/admin" element={<AdminLogin />} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/admin/goods" element={<ProtectedRoute><GoodsPage /></ProtectedRoute>} />
+          <Route path="/admin/goods/create" element={<ProtectedRoute><CreateGoods /></ProtectedRoute>} />
+          <Route path="/admin/goods/edit/:id" element={<ProtectedRoute><EditGoods /></ProtectedRoute>} />
         </Routes>
       </Router>
     </div>

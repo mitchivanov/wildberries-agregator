@@ -29,7 +29,7 @@ const Dashboard = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <Link 
-            to="/goods" 
+            to="/admin/goods" 
             className={`p-6 rounded-lg shadow hover:shadow-md transition ${
               isDarkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-50'
             }`}
@@ -49,7 +49,7 @@ const Dashboard = () => {
           </h2>
           <div className="space-y-4">
             <Link 
-              to="/goods/create" 
+              to="/admin/goods/create" 
               className={`block w-full text-center py-2 px-4 rounded ${
                 isDarkMode 
                   ? 'bg-blue-700 text-white hover:bg-blue-600' 
@@ -59,7 +59,7 @@ const Dashboard = () => {
               Добавить новый товар
             </Link>
             <Link 
-              to="/goods" 
+              to="/admin/goods" 
               className={`block w-full text-center py-2 px-4 rounded ${
                 isDarkMode 
                   ? 'bg-gray-700 text-white hover:bg-gray-600' 

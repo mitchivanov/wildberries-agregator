@@ -8,6 +8,11 @@ class GoodsBase(BaseModel):
     article: str
     image: str
     is_active: bool = True
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    min_daily: int = 1
+    max_daily: int = 10
+    purchase_guide: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -29,3 +34,34 @@ class GoodsResponse(GoodsBase):
     
     class Config:
         orm_mode = True
+
+class ReservationResponse(BaseModel):
+    id: int
+    goods_id: int
+    user_id: int
+    quantity: int
+    reserved_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class DailyAvailabilityBase(BaseModel):
+    goods_id: int
+    date: datetime
+    available_quantity: int
+
+    class Config:
+        from_attributes = True
+
+class DailyAvailabilityResponse(DailyAvailabilityBase):
+    id: int
+    
+    class Config:
+        orm_mode = True
+
+class ReservationBase(BaseModel):
+    goods_id: int
+    quantity: int = 1
+
+class ReservationCreate(ReservationBase):
+    pass

@@ -1,15 +1,18 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useTelegram } from '../hooks/useTelegram';
+import { useAuth } from '../hooks/useAuth';
 
 const Layout = ({ children }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { webApp, isDarkMode } = useTelegram();
+  const { logout } = useAuth();
   
   useEffect(() => {
     if (webApp) {
       // Настраиваем главную кнопку в зависимости от маршрута
-      if (location.pathname === '/goods') {
+      if (location.pathname === '/admin/goods') {
         webApp.MainButton.setParams({
           text: 'Создать товар',
           color: '#0B63F6',
@@ -17,7 +20,7 @@ const Layout = ({ children }) => {
         });
         
         const handleMainButtonClick = () => {
-          window.location.href = '/goods/create';
+          navigate('/admin/goods/create');
         };
         
         webApp.MainButton.onClick(handleMainButtonClick);
@@ -31,7 +34,7 @@ const Layout = ({ children }) => {
         webApp.MainButton.hide();
       }
     }
-  }, [location.pathname, webApp]);
+  }, [location.pathname, webApp, navigate]);
 
   // Классы с учетом темной/светлой темы
   const navLinkClass = (path) => {
@@ -45,6 +48,11 @@ const Layout = ({ children }) => {
     
     return `${baseClass} ${location.pathname === path ? activeClass : inactiveClass}`;
   };
+  
+  const handleLogout = () => {
+    logout();
+    navigate('/admin');
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -53,24 +61,36 @@ const Layout = ({ children }) => {
           <div className="flex justify-between h-16">
             <div className="flex">
               <div className="flex-shrink-0 flex items-center">
-                <Link to="/" className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
+                <Link to="/admin/dashboard" className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
                   Админ-панель
                 </Link>
               </div>
               <nav className="ml-6 flex space-x-4">
                 <Link
-                  to="/"
-                  className={navLinkClass('/')}
+                  to="/admin/dashboard"
+                  className={navLinkClass('/admin/dashboard')}
                 >
                   Главная
                 </Link>
                 <Link
-                  to="/goods"
-                  className={navLinkClass('/goods')}
+                  to="/admin/goods"
+                  className={navLinkClass('/admin/goods')}
                 >
                   Товары
                 </Link>
               </nav>
+            </div>
+            <div className="flex items-center">
+              <button
+                onClick={handleLogout}
+                className={`px-3 py-2 rounded-md text-sm font-medium ${
+                  isDarkMode 
+                    ? 'text-gray-300 hover:bg-gray-700 hover:text-white' 
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                }`}
+              >
+                Выйти
+              </button>
             </div>
           </div>
         </div>

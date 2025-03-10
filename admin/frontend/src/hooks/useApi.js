@@ -5,11 +5,35 @@ import { useTelegram } from './useTelegram';
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// Добавляем перехватчик запросов для проблем с CORS
+api.interceptors.request.use(config => {
+  // Добавляем случайный параметр к URL для предотвращения кэширования
+  if (config.method === 'get') {
+    config.params = {
+      ...config.params,
+      _t: Date.now()
+    };
+  }
+  return config;
+});
+
+// Добавляем перехватчик ответов для обработки ошибок
+api.interceptors.response.use(
+  response => response,
+  error => {
+    console.error('API Error:', error);
+    if (error.message === 'Network Error') {
+      console.error('Сетевая ошибка. Проверьте соединение с бэкендом.');
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Кэш для запросов
 const queryCache = new Map();
@@ -28,43 +52,28 @@ export const useApi = () => {
   }, [initData]);
 
   // Общая функция для запросов с обработкой ошибок и индикатором загрузки
-  const request = useCallback(async (method, url, data = null, options = {}) => {
+  const request = useCallback(async (method, url, data = null) => {
     try {
       setLoading(true);
-      setError(null);
-
-      // Проверяем кэш для GET запросов
-      const cacheKey = method === 'get' ? url : null;
-      if (cacheKey && queryCache.has(cacheKey) && !options.skipCache) {
-        console.log(`Данные получены из кэша для ${url}`);
-        return queryCache.get(cacheKey);
-      }
-
-      console.log(`Отправка ${method.toUpperCase()} запроса на ${url}`);
       const response = await api({
         method,
         url,
         data,
-        ...options
+        params: method === 'get' ? data : null
       });
-
-      // Сохраняем в кэш для GET запросов
-      if (cacheKey) {
-        queryCache.set(cacheKey, response.data);
-      }
-
       return response.data;
-    } catch (err) {
-      console.error(`Ошибка в ${method.toUpperCase()} запросе на ${url}:`, err);
-      
-      const errorMessage = err.response?.data?.detail || err.message || 'Произошла ошибка';
+    } catch (error) {
+      const errorMessage = error.response?.data?.detail || error.message;
       setError(errorMessage);
+      toast.error(`Ошибка: ${errorMessage}`);
       
-      if (!options.suppressToast) {
-        toast.error(errorMessage);
-      }
-      
-      throw err;
+      // Возвращаем стандартизированный объект ошибки
+      return {
+        error: true,
+        message: errorMessage,
+        status: error.response?.status,
+        data: error.response?.data
+      };
     } finally {
       setLoading(false);
     }
@@ -93,9 +102,12 @@ export const useApi = () => {
     console.log('Создание нового товара:', goodsData);
     const result = await request('post', '/goods/', goodsData);
     
-    // Сбрасываем кэш списка товаров
+    if (result.error) {
+      // Ошибка уже обработана в request
+      return result;
+    }
+
     queryCache.delete('/goods/');
-    
     toast.success('Товар успешно создан');
     return result;
   }, [request]);
@@ -124,6 +136,25 @@ export const useApi = () => {
     toast.success('Товар успешно удален');
   }, [request]);
 
+  // Бронирование товара
+  const reserveGoods = useCallback(async (goodsId, quantity = 1) => {
+    console.log(`Бронирование товара ${goodsId}, количество: ${quantity}`);
+    const result = await request('post', '/reservations/', {
+      goods_id: goodsId,
+      quantity: quantity,
+      // user_id получается из Telegram данных на бэкенде
+    });
+    
+    if (!result.error) {
+      // Сбрасываем кэш для обновления списка
+      queryCache.delete('/goods/');
+      queryCache.delete(`/goods/${goodsId}`);
+      
+      toast.success('Товар успешно забронирован');
+    }
+    return result;
+  }, [request]);
+
   return {
     loading,
     error,
@@ -133,5 +164,6 @@ export const useApi = () => {
     createGoods,
     updateGoods,
     deleteGoods,
+    reserveGoods,
   };
 }; 
