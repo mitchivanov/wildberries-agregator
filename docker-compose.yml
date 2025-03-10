@@ -22,7 +22,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://socialist:revolution2023@postgres:5432/wb_aggregator
       BOT_TOKEN: 7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc
-      TELEGRAM_WEBAPP_URL: libertylib.online
+      TELEGRAM_WEBAPP_URL: https://eb56-89-169-52-137.ngrok-free.app
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,30 +35,22 @@ services:
   frontend:
     build: ./admin/frontend
     ports:
-      - "80:80"    # HTTP порт для редиректа
-      - "443:443"  # HTTPS порт
-    environment:
-      VITE_API_URL: https://libertylib.online/api
+      - "3000:80"
     depends_on:
       - backend
-    volumes:
-      - ./admin/frontend/nginx.conf:/etc/nginx/conf.d/default.conf
-      - letsencrypt:/etc/letsencrypt
     networks:
       - frontend-network
-      - backend-network
 
   bot:
     build: ./admin/bot
     environment:
       BOT_TOKEN: 7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc
-      WEBAPP_URL: https://libertylib.online
+      WEBAPP_URL: https://eb56-89-169-52-137.ngrok-free.app
     networks:
       - backend-network
 
 volumes:
   postgres_data:
-  letsencrypt:  # Том для сертификатов Let's Encrypt
 
 networks:
   backend-network:
