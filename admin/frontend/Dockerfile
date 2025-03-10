@@ -9,4 +9,9 @@ RUN npm run build
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80 
+
+# Создаем необходимую структуру директорий для Let's Encrypt
+RUN mkdir -p /etc/letsencrypt/live/libertylib.online
+
+EXPOSE 80
+EXPOSE 443 
