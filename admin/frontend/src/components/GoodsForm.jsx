@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useTelegram } from '../hooks/useTelegram';
 import { toast } from 'react-hot-toast';
+import { useTheme } from '../hooks/useTheme';
+import { useToast } from '../hooks/useToast';
 
 const GoodsForm = ({ editMode = false }) => {
   const { id } = useParams();
@@ -11,6 +13,12 @@ const GoodsForm = ({ editMode = false }) => {
   const { isDarkMode, webApp } = useTelegram();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [urlToFetch, setUrlToFetch] = useState('');
+  const [isUrlFormVisible, setIsUrlFormVisible] = useState(!id);
+  const [urlLoading, setUrlLoading] = useState(false);
+  const { isDarkMode: themeIsDarkMode } = useTheme();
+  const { toast: useToastToast } = useToast();
+  const { parseWbProduct } = useApi();
 
   // Состояние формы
   const [form, setForm] = useState({
@@ -97,6 +105,39 @@ const GoodsForm = ({ editMode = false }) => {
     }
   };
 
+  // Функция для автозаполнения данных товара по URL
+  const handleFetchProductData = async () => {
+    if (!urlToFetch) {
+      toast.error('Введите URL товара');
+      return;
+    }
+    
+    try {
+      setUrlLoading(true);
+      const data = await parseWbProduct(urlToFetch);
+      
+      // Заполняем форму полученными данными
+      setForm(prev => ({
+        ...prev,
+        name: data.name,
+        article: data.article,
+        price: data.price,
+        url: data.url,
+        image: data.image
+      }));
+      
+      // Скрываем форму URL и показываем основную форму
+      setIsUrlFormVisible(false);
+      toast.success('Данные товара успешно загружены');
+    } catch (err) {
+      toast.error(`Ошибка при получении данных: ${err.message}`);
+      // В случае ошибки просто скрываем форму URL и показываем пустую форму
+      setIsUrlFormVisible(false);
+    } finally {
+      setUrlLoading(false);
+    }
+  };
+
   // Валидация формы
   const validateForm = () => {
     const newErrors = {};
@@ -137,6 +178,13 @@ const GoodsForm = ({ editMode = false }) => {
       newErrors.end_date = 'Дата окончания должна быть позже даты начала';
     }
     
+    const minDaily = parseInt(form.min_daily, 10);
+    const maxDaily = parseInt(form.max_daily, 10);
+    
+    if (!isNaN(minDaily) && !isNaN(maxDaily) && minDaily > maxDaily) {
+      newErrors.max_daily = 'Максимальное количество должно быть не меньше минимального';
+    }
+    
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -154,15 +202,12 @@ const GoodsForm = ({ editMode = false }) => {
     try {
       // Формируем данные для отправки
       const goodsData = {
-        name: form.name.trim(),
-        article: form.article.trim(),
-        url: form.url.trim(),
+        ...form,
+        // Преобразуем строки в числа
         price: parseInt(form.price, 10),
-        cashback_percent: parseInt(form.cashback_percent, 10) || 0,
-        purchase_guide: form.purchase_guide.trim(),
-        image: form.image.trim(),
-        min_daily: parseInt(form.min_daily, 10) || 1,
-        max_daily: parseInt(form.max_daily, 10) || 10
+        cashback_percent: parseInt(form.cashback_percent, 10),
+        min_daily: parseInt(form.min_daily, 10),
+        max_daily: parseInt(form.max_daily, 10)
       };
       
       // Добавляем даты, если они указаны
@@ -194,13 +239,13 @@ const GoodsForm = ({ editMode = false }) => {
 
   // Классы для темной/светлой темы
   const inputClass = `w-full p-3 rounded-md border text-lg ${
-    isDarkMode 
+    themeIsDarkMode 
       ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
       : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
   } focus:ring-2 focus:ring-blue-500 focus:border-blue-500`;
   
   const labelClass = `block text-lg font-medium mb-2 ${
-    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+    themeIsDarkMode ? 'text-gray-200' : 'text-gray-700'
   }`;
   
   const errorClass = 'mt-1 text-red-600 dark:text-red-400 text-sm';
@@ -209,13 +254,77 @@ const GoodsForm = ({ editMode = false }) => {
     return (
       <div className="text-center py-10">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-        <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка данных...</p>
+        <p className={`mt-2 ${themeIsDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка данных...</p>
+      </div>
+    );
+  }
+
+  // Если форма URL видима, показываем её
+  if (isUrlFormVisible && !editMode) {
+    return (
+      <div className={`w-full max-w-4xl mx-auto ${themeIsDarkMode ? 'text-white' : 'text-gray-900'}`}>
+        <h1 className="text-2xl font-bold mb-6">Добавление нового товара</h1>
+        
+        <div className="mb-6 p-6 rounded-lg border shadow-sm bg-opacity-50 backdrop-blur-sm 
+          ${themeIsDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}">
+          <p className="mb-4">Введите URL товара с Wildberries для автозаполнения данных:</p>
+          
+          <div className="flex space-x-2">
+            <input
+              type="text"
+              value={urlToFetch}
+              onChange={(e) => setUrlToFetch(e.target.value)}
+              placeholder="https://www.wildberries.ru/catalog/123456/detail.aspx"
+              className={`flex-1 p-3 rounded-md border text-lg ${
+                themeIsDarkMode 
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+              }`}
+            />
+            
+            <button
+              onClick={handleFetchProductData}
+              disabled={urlLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            >
+              {urlLoading ? (
+                <span className="flex items-center">
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Загрузка...
+                </span>
+              ) : "Заполнить данные"}
+            </button>
+          </div>
+          
+          <div className="mt-4 flex justify-between">
+            <button
+              onClick={() => setIsUrlFormVisible(false)}
+              className={`px-4 py-2 rounded-md ${
+                themeIsDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
+              }`}
+            >
+              Заполнить форму вручную
+            </button>
+            
+            <button
+              onClick={() => navigate('/admin/goods')}
+              className={`px-4 py-2 rounded-md ${
+                themeIsDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
+              }`}
+            >
+              Вернуться к списку
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className={`w-full max-w-4xl mx-auto ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+    <div className={`w-full max-w-4xl mx-auto ${themeIsDarkMode ? 'text-white' : 'text-gray-900'}`}>
       <h1 className="text-2xl font-bold mb-6">
         {editMode ? 'Редактирование товара' : 'Добавление нового товара'}
       </h1>

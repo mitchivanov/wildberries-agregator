@@ -20,6 +20,8 @@ import logging
 from worker import update_goods_activity
 import time
 from aiohttp import ClientSession
+import re
+import math
 
 from database import get_db, init_db, close_db, AsyncScopedSession
 from models import Goods, Reservation, DailyAvailability
@@ -768,6 +770,120 @@ async def read_all_reservations(
         response_list.append(reservation_dict)
     
     return response_list
+
+# Функция для извлечения ID товара из URL Wildberries
+def extract_product_id(url):
+    pattern = r'catalog/(\d+)/detail'
+    match = re.search(pattern, url)
+    if match:
+        return match.group(1)
+    return None
+
+# Функция для округления цены в меньшую сторону
+def floor_price(price):
+    if price is None:
+        return None
+    
+    # Округляем до ближайшего числа, оканчивающегося на 9
+    whole_part = math.floor(price)
+    if whole_part < 100:
+        return whole_part - 1 + 0.9
+    elif whole_part < 1000:
+        return whole_part - 10 + 9
+    else:
+        return whole_part - 100 + 90
+
+# Добавляем новый маршрут для парсинга товара
+@app.post("/parse-wb-product/")
+async def parse_wb_product(data: dict):
+    """Парсит данные о товаре с Wildberries по URL"""
+    url = data.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL не предоставлен")
+    
+    logger.info(f"Парсинг товара по URL: {url}")
+    
+    # Извлекаем ID товара из URL
+    product_id = extract_product_id(url)
+    if not product_id:
+        raise HTTPException(status_code=400, detail="Не удалось извлечь ID товара из URL")
+    
+    try:
+        # Формируем URL для API Wildberries
+        api_url = f'https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&dest=-1257786&spp=27&nm={product_id}'
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': f'https://www.wildberries.ru/catalog/{product_id}/detail.aspx',
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, headers=headers) as response:
+                if response.status != 200:
+                    # Пробуем альтернативный URL
+                    alt_url = f'https://wbx-content-v2.wbstatic.net/ru/{product_id}.json'
+                    async with session.get(alt_url) as alt_response:
+                        if alt_response.status == 200:
+                            data = await alt_response.json()
+                            product = data
+                        else:
+                            raise HTTPException(status_code=404, detail="Товар не найден")
+                else:
+                    data = await response.json()
+                    if 'data' in data and 'products' in data['data'] and data['data']['products']:
+                        product = data['data']['products'][0]
+                    else:
+                        # Пробуем альтернативный URL
+                        alt_url = f'https://wbx-content-v2.wbstatic.net/ru/{product_id}.json'
+                        async with session.get(alt_url) as alt_response:
+                            if alt_response.status == 200:
+                                data = await alt_response.json()
+                                product = data
+                            else:
+                                raise HTTPException(status_code=404, detail="Товар не найден")
+        
+        # Получаем детали товара
+        name = product.get('name', '')
+        article = product.get('article', product_id)
+        
+        # Получаем цену и округляем в меньшую сторону
+        price = None
+        if 'salePriceU' in product:
+            base_sale_price = product['salePriceU'] / 100
+            price = math.floor(base_sale_price)
+        elif 'priceU' in product:
+            base_price = product['priceU'] / 100
+            if 'sale' in product:
+                sale_percent = product['sale']
+                base_sale_price = base_price * (1 - sale_percent/100)
+                price = math.floor(base_sale_price)
+            else:
+                price = math.floor(base_price)
+        
+        # Получаем URL изображения
+        image_url = ""
+        nm = int(product_id)
+        vol = nm // 100000
+        part = nm // 1000
+        
+        # Статический URL для превью изображения Wildberries
+        image_url = f"https://images.wbstatic.net/big/new/{vol}0000/{nm}-1.jpg"
+        
+        # Формируем и возвращаем данные о товаре
+        return {
+            "name": name,
+            "article": article,
+            "price": price,
+            "url": url,
+            "image": image_url,
+            "product_id": product_id
+        }
+        
+    except Exception as e:
+        logger.exception(f"Ошибка при парсинге товара: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при парсинге товара: {str(e)}")
 
 # Для тестирования приложения
 if __name__ == "__main__":

@@ -213,6 +213,24 @@ export const useApi = () => {
     }
   }, []);
 
+  // Парсинг товара Wildberries
+  const parseWbProduct = useCallback(async (url) => {
+    console.log('Парсинг товара Wildberries:', url);
+    
+    try {
+      setLoading(true);
+      const response = await api.post('/parse-wb-product/', { url });
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при парсинге товара:', error);
+      setError(error.message || 'Произошла ошибка при получении данных о товаре');
+      toast.error(`Ошибка: ${error.message || 'Не удалось получить данные о товаре'}`);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   return {
     loading,
     error,
@@ -225,5 +243,6 @@ export const useApi = () => {
     reserveGoods,
     getAllReservations,
     getAllAvailability,
+    parseWbProduct,
   };
 }; 
