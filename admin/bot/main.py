@@ -20,8 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Только нефритовый лидер имеет доступ
-SUPER_ADMIN_ID = 5304440647
+# Список ID админов из переменной окружения
+SUPER_ADMIN_IDS = set(map(str, os.getenv("SUPER_ADMIN_ID", "").split(",")))
 
 bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
 dp = Dispatcher()
@@ -76,8 +76,8 @@ async def cmd_shop(message: types.Message):
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
-    if str(message.from_user.id) != str(SUPER_ADMIN_ID):
-        return await message.answer("Доступ запрещён! 🚫 Только Великий Лидер!")
+    if str(message.from_user.id) not in SUPER_ADMIN_IDS:
+        return await message.answer("Доступ запрещён! 🚫!")
     
     # Сохраняем ID админа
     users_started.add(message.from_user.id)
