@@ -137,6 +137,13 @@ const GoodsForm = ({ editMode = false }) => {
       newErrors.end_date = 'Дата окончания должна быть позже даты начала';
     }
     
+    const minDaily = parseInt(form.min_daily, 10);
+    const maxDaily = parseInt(form.max_daily, 10);
+    
+    if (!isNaN(minDaily) && !isNaN(maxDaily) && minDaily > maxDaily) {
+      newErrors.max_daily = 'Максимальное количество должно быть не меньше минимального';
+    }
+    
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -154,15 +161,12 @@ const GoodsForm = ({ editMode = false }) => {
     try {
       // Формируем данные для отправки
       const goodsData = {
-        name: form.name.trim(),
-        article: form.article.trim(),
-        url: form.url.trim(),
+        ...form,
+        // Преобразуем строки в числа
         price: parseInt(form.price, 10),
-        cashback_percent: parseInt(form.cashback_percent, 10) || 0,
-        purchase_guide: form.purchase_guide.trim(),
-        image: form.image.trim(),
-        min_daily: parseInt(form.min_daily, 10) || 1,
-        max_daily: parseInt(form.max_daily, 10) || 10
+        cashback_percent: parseInt(form.cashback_percent, 10),
+        min_daily: parseInt(form.min_daily, 10),
+        max_daily: parseInt(form.max_daily, 10)
       };
       
       // Добавляем даты, если они указаны
