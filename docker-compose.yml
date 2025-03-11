@@ -19,7 +19,7 @@ services:
     build: ./admin/backend
     environment:
       DATABASE_URL: postgresql+asyncpg://socialist:revolution2023@postgres:5432/wb_aggregator
-      BOT_TOKEN: 7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc
+      BOT_TOKEN: 7090333910:AAGaoebRTghPoeJValIhSe1aSAdqHuK_tlU
       TELEGRAM_WEBAPP_URL: https://develooper.ru
     depends_on:
       postgres:
@@ -44,7 +44,7 @@ services:
   bot:
     build: ./admin/bot
     environment:
-      BOT_TOKEN: 7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc
+      BOT_TOKEN: 7090333910:AAGaoebRTghPoeJValIhSe1aSAdqHuK_tlU
       WEBAPP_URL: https://develooper.ru
     networks:
       - backend-network

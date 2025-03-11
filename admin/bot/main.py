@@ -30,9 +30,9 @@ app.add_middleware(
 )
 
 # Только нефритовый лидер имеет доступ
-SUPER_ADMIN_ID = 5304440647
+SUPER_ADMIN_IDS = ['5304440647', '6382748916']
 
-bot = Bot(token="7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc")
+bot = Bot(token="7090333910:AAGaoebRTghPoeJValIhSe1aSAdqHuK_tlU")
 dp = Dispatcher()
 
 WEBAPP_URL = os.getenv("WEBAPP_URL") + "?startapp=1"  # Добавляем параметр для инициализации
@@ -87,7 +87,7 @@ async def cmd_shop(message: types.Message):
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
-    if str(message.from_user.id) != str(SUPER_ADMIN_ID):
+    if str(message.from_user.id) not in SUPER_ADMIN_IDS.split(","):
         return await message.answer("Доступ запрещён!")
     
     # Сохраняем ID админа
