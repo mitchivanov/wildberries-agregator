@@ -60,7 +60,7 @@ services:
   bot:
     build: ./admin/bot
     environment:
-      BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       WEBAPP_URL: ${TELEGRAM_WEBAPP_URL}
       SUPER_ADMIN_IDS: ${SUPER_ADMIN_IDS}
       CORS_ORIGINS: ${CORS_ORIGINS}
