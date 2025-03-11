@@ -3,9 +3,12 @@ import axios from 'axios';
 import { toast } from 'react-hot-toast';
 import { useTelegram } from './useTelegram';
 
+// URL должен быть задан при сборке или передан через переменные окружения
+const API_URL = process.env.REACT_APP_API_URL || 'https://develooper.ru/api';
+
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'https://develooper.ru/api',
+  baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },

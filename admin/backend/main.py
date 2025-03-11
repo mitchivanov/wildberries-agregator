@@ -20,6 +20,7 @@ import logging
 from worker import update_goods_activity
 import time
 from aiohttp import ClientSession
+from starlette_exporter import PrometheusMiddleware, handle_metrics
 
 from database import get_db, init_db, close_db, AsyncScopedSession
 from models import Goods, Reservation, DailyAvailability
@@ -33,12 +34,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Получаем токен из окружения
-BOT_TOKEN = "7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Добавляем режим разработки
-DEVELOPMENT_MODE = os.environ.get("DEVELOPMENT_MODE", "True").lower() == "true"
+DEVELOPMENT_MODE = os.environ.get("DEVELOPMENT_MODE", "False").lower() == "true"
 
 # Добавляем URL для бота
 BOT_API_URL = os.getenv("BOT_API_URL", "http://bot:8080")
+
+# CORS настройки
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://develooper.ru").split(",")
 
 # Добавляем переменную для отслеживания времени последнего запроса
 _last_availability_request_time = 0
@@ -55,10 +59,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Goods Admin API", lifespan=lifespan)
 
-# Добавляем CORS для обработки запросов с нового домена
+# Добавляем CORS для обработки запросов
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://develooper.ru"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -768,6 +772,15 @@ async def read_all_reservations(
         response_list.append(reservation_dict)
     
     return response_list
+
+# Добавляем мониторинг Prometheus
+app.add_middleware(
+    PrometheusMiddleware,
+    app_name="wb_aggregator_backend",
+    group_paths=True,
+    filter_unhandled_paths=True,
+)
+app.add_route("/metrics", handle_metrics)
 
 # Для тестирования приложения
 if __name__ == "__main__":
