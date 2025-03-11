@@ -54,15 +54,27 @@ services:
     networks:
       - backend-network
 
-  frontend:
-    build: ./admin/frontend
-    depends_on:
-      - backend
-    expose:
-      - "80"
+  frontend-builder:
+    build:
+      context: admin/frontend
+      dockerfile: Dockerfile
+    volumes:
+      - frontend-build:/app/dist
     environment:
-      VITE_API_URL: ${API_URL}
-    networks: 
+      - NODE_ENV=production
+
+  frontend:
+    image: nginx:alpine
+    restart: always
+    volumes:
+      - frontend-build:/usr/share/nginx/html:ro
+      - ./admin/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - frontend-builder
+    networks:
       - frontend-network
 
   bot:
@@ -122,6 +134,7 @@ volumes:
   postgres_data:
   certbot-data:
   certbot-www:
+  frontend-build:
 
 networks:
   backend-network:
