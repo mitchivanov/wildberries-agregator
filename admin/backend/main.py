@@ -55,10 +55,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Goods Admin API", lifespan=lifespan)
 
-# Добавляем CORS для обработки кросс-доменных запросов от ngrok
+# Добавляем CORS для обработки запросов с нового домена
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Разрешаем все источники (для ngrok)
+    allow_origins=["https://develooper.ru"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

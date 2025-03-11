@@ -23,7 +23,7 @@ app = FastAPI()
 # Настройка CORS для API бота
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://develooper.ru"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

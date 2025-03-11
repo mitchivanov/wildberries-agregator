@@ -5,7 +5,7 @@ import { useTelegram } from './useTelegram';
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'https://1657-89-169-52-137.ngrok-free.app/api',
+  baseURL: 'https://develooper.ru/api',
   headers: {
     'Content-Type': 'application/json',
   },
