@@ -11,8 +11,8 @@ const GoodsDetail = () => {
   const { isDarkMode, webApp, user } = useTelegram();
   
   const [goods, setGoods] = useState(null);
-  const [quantity, setQuantity] = useState(1);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [availableToday, setAvailableToday] = useState(0);
   
   useEffect(() => {
     loadGoodsDetails();
@@ -27,15 +27,21 @@ const GoodsDetail = () => {
         webApp.BackButton.hide();
       };
     }
-  }, [id, webApp]);
+  }, [webApp, navigate, id]);
   
   const loadGoodsDetails = async () => {
     try {
-      const data = await getGoodsById(id);
-      if (data) {
-        setGoods(data);
-        // Устанавливаем начальное количество на минимальное доступное
-        setQuantity(1);
+      const result = await getGoodsById(id);
+      if (result) {
+        setGoods(result);
+        // Получаем доступное количество товара на сегодня
+        if (result.daily_availability && result.daily_availability.length > 0) {
+          const today = new Date().toISOString().split('T')[0];
+          const todayAvailability = result.daily_availability.find(item => 
+            item.date.split('T')[0] === today
+          );
+          setAvailableToday(todayAvailability ? todayAvailability.available_quantity : 0);
+        }
       }
     } catch (error) {
       console.error('Ошибка при загрузке товара:', error);
@@ -43,11 +49,11 @@ const GoodsDetail = () => {
     }
   };
   
-  const handleQuantityChange = (e) => {
-    const value = parseInt(e.target.value);
-    if (value > 0 && goods && value <= goods.max_daily) {
-      setQuantity(value);
-    }
+  // Функция для расчета цены с учетом кэшбека
+  const calculatePriceWithCashback = (price, cashbackPercent) => {
+    if (!cashbackPercent) return price;
+    const discountAmount = (price * cashbackPercent) / 100;
+    return Math.round(price - discountAmount);
   };
   
   const openConfirmation = () => {
@@ -60,7 +66,8 @@ const GoodsDetail = () => {
   
   const handleReserve = async () => {
     try {
-      const result = await reserveGoods(goods.id, quantity);
+      // Всегда бронируем 1 товар
+      const result = await reserveGoods(goods.id, 1);
       
       if (result.error) {
         // Если вернулась ошибка из API
@@ -82,56 +89,79 @@ const GoodsDetail = () => {
   if (loading || !goods) {
     return (
       <div className="text-center py-20">
-        <div className={`animate-spin h-12 w-12 border-4 rounded-full mx-auto ${isDarkMode ? 'border-blue-500 border-t-transparent' : 'border-gray-700 border-t-transparent'}`}></div>
-        <p className={`mt-4 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Загрузка информации о товаре...</p>
+        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto"></div>
+        <p className={`mt-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+          Загрузка информации о товаре...
+        </p>
       </div>
     );
   }
   
   return (
-    <div className={`max-w-4xl mx-auto p-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
-      <div className={`rounded-lg shadow-lg overflow-hidden ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className={`overflow-hidden rounded-lg shadow ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
         <div className="md:flex">
-          <div className="md:w-1/2">
-            <img 
-              src={goods.image} 
-              alt={goods.name} 
-              className="w-full h-full object-cover object-center"
-              onError={(e) => { e.target.src = '/placeholder.jpg'; }}
+          <div className="md:flex-shrink-0 md:w-1/2">
+            <img
+              className="h-80 w-full object-contain md:h-full"
+              src={goods.image}
+              alt={goods.name}
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.src = 'https://via.placeholder.com/400x400?text=Нет+изображения';
+              }}
             />
           </div>
+          
           <div className="p-6 md:w-1/2">
             <h1 className={`text-2xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
               {goods.name}
             </h1>
-            <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+            
+            <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
               Артикул: {goods.article}
             </p>
-            <div className={`text-3xl font-bold mb-6 ${isDarkMode ? 'text-green-400' : 'text-green-600'}`}>
-              {goods.price.toLocaleString()} ₽
+            
+            {/* Цена товара */}
+            <div className="mb-6">
+              {goods.cashback_percent > 0 ? (
+                <>
+                  {/* Цена с учетом кэшбека (главная) */}
+                  <div className={`text-3xl font-bold ${isDarkMode ? 'text-green-400' : 'text-green-600'}`}>
+                    {calculatePriceWithCashback(goods.price, goods.cashback_percent).toLocaleString()} ₽
+                  </div>
+                  
+                  {/* Цена без кэшбека (зачеркнутая) */}
+                  <div className="mt-1">
+                    <span className={`text-lg line-through ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {goods.price.toLocaleString()} ₽
+                    </span>
+                    <span className={`ml-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                      Кэшбек {goods.cashback_percent}%
+                    </span>
+                  </div>
+                </>
+              ) : (
+                /* Если кэшбека нет, то просто показываем обычную цену */
+                <div className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {goods.price.toLocaleString()} ₽
+                </div>
+              )}
             </div>
             
-            <div className="mb-6">
-              <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Количество:
-              </label>
-              <input
-                type="number"
-                min="1"
-                max={goods.max_daily}
-                value={quantity}
-                onChange={handleQuantityChange}
-                className={`w-20 px-3 py-2 border rounded-md ${
-                  isDarkMode 
-                    ? 'bg-gray-700 border-gray-600 text-white' 
-                    : 'bg-white border-gray-300 text-gray-900'
-                }`}
-              />
+            <div className="flex items-center mt-4">
+              <span className={`inline-block px-3 py-1 text-sm font-semibold rounded-full ${
+                isDarkMode 
+                  ? 'bg-green-700 text-white' 
+                  : 'bg-green-100 text-green-800'
+              }`}>
+                Доступно сегодня: {availableToday} шт.
+              </span>
             </div>
             
             <button
               onClick={openConfirmation}
-              className={`w-full py-3 px-4 rounded-md text-white font-medium ${
+              className={`w-full py-3 px-4 rounded-md text-white font-medium mt-6 ${
                 isDarkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'
               }`}
             >
@@ -162,7 +192,7 @@ const GoodsDetail = () => {
               Подтверждение бронирования
             </h3>
             <p className={`mb-6 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-              Вы действительно хотите забронировать товар "{goods.name}" в количестве {quantity} шт.?
+              Вы действительно хотите забронировать товар "{goods.name}"?
             </p>
             <div className="flex justify-end space-x-4">
               <button

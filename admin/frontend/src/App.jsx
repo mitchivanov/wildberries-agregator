@@ -10,6 +10,8 @@ import Catalog from './pages/Catalog';
 import GoodsDetail from './pages/GoodsDetail';
 import AdminLogin from './pages/AdminLogin';
 import ProtectedRoute from './components/ProtectedRoute';
+import AllReservations from './pages/AllReservations';
+import AllAvailability from './pages/AllAvailability';
 
 console.log('=== Рендеринг App компонента ===');
 
@@ -50,6 +52,10 @@ function App() {
           <Route path="/admin/goods" element={<ProtectedRoute><GoodsPage /></ProtectedRoute>} />
           <Route path="/admin/goods/create" element={<ProtectedRoute><CreateGoods /></ProtectedRoute>} />
           <Route path="/admin/goods/edit/:id" element={<ProtectedRoute><EditGoods /></ProtectedRoute>} />
+          
+          {/* Новые маршруты для бронирований и доступности */}
+          <Route path="/admin/reservations" element={<ProtectedRoute><AllReservations /></ProtectedRoute>} />
+          <Route path="/admin/availability" element={<ProtectedRoute><AllAvailability /></ProtectedRoute>} />
         </Routes>
       </Router>
     </div>

@@ -15,6 +15,7 @@ const GoodsList = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [highlightedGoodsId, setHighlightedGoodsId] = useState(null);
 
   // Загрузка товаров при монтировании компонента
   const loadGoods = async () => {
@@ -23,6 +24,29 @@ const GoodsList = () => {
     try {
       const data = await getGoods();
       if (data) setGoods(data);
+      
+      // Проверяем, есть ли сохраненный ID для подсветки
+      const savedHighlightId = localStorage.getItem('highlightedGoodsId');
+      if (savedHighlightId) {
+        setHighlightedGoodsId(parseInt(savedHighlightId));
+        
+        // Очищаем после использования
+        localStorage.removeItem('highlightedGoodsId');
+        
+        // Прокручиваем к выделенному товару через небольшую задержку
+        setTimeout(() => {
+          const element = document.getElementById(`goods-row-${savedHighlightId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Анимация подсветки
+            element.classList.add('highlight-animation');
+            setTimeout(() => {
+              element.classList.remove('highlight-animation');
+            }, 2000);
+          }
+        }, 100);
+      }
     } catch (err) {
       setError(err.message);
       toast.error(`Ошибка при загрузке товаров: ${err.message}`);
@@ -145,7 +169,19 @@ const GoodsList = () => {
                   Артикул
                 </th>
                 <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                  URL
+                </th>
+                <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                   Цена
+                </th>
+                <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                  Кэшбэк %
+                </th>
+                <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                  Доступность/день
+                </th>
+                <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                  Доступно сегодня
                 </th>
                 <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                   Статус
@@ -160,8 +196,9 @@ const GoodsList = () => {
                 <GoodsItem 
                   key={item.id} 
                   goods={item} 
-                  onDelete={handleDelete} 
-                  isDarkMode={isDarkMode}
+                  onDelete={handleDelete}
+                  isHighlighted={item.id === highlightedGoodsId}
+                  rowId={`goods-row-${item.id}`}
                 />
               ))}
             </tbody>

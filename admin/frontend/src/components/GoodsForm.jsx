@@ -16,12 +16,15 @@ const GoodsForm = ({ editMode = false }) => {
   const [form, setForm] = useState({
     name: '',
     article: '',
+    url: '',
     price: 0,
-    description: '',
+    cashback_percent: 0,
+    purchase_guide: '',
     image: '',
     start_date: '',
     end_date: '',
-    is_active: true
+    min_daily: 1,
+    max_daily: 10
   });
 
   // Состояние ошибок валидации
@@ -40,7 +43,7 @@ const GoodsForm = ({ editMode = false }) => {
     try {
       const data = await getGoodsById(id);
       if (data) {
-        // Преобразуем даты из ISO в локальный формат для input type="datetime-local"
+        // Преобразуем даты из ISO в локальный формат для input type="date"
         const formattedData = {
           ...data,
           start_date: data.start_date ? formatDateForInput(data.start_date) : '',
@@ -55,14 +58,11 @@ const GoodsForm = ({ editMode = false }) => {
     }
   };
 
-  // Форматирование даты из ISO в формат для input datetime-local
+  // Форматирование даты из ISO в формат для input date
   const formatDateForInput = (isoDate) => {
     if (!isoDate) return '';
     const date = new Date(isoDate);
-    // Преобразуем в формат YYYY-MM-DDThh:mm который требуется для datetime-local
-    return new Date(date.getTime() - (date.getTimezoneOffset() * 60000))
-      .toISOString()
-      .slice(0, 16);
+    return date.toISOString().split('T')[0];
   };
 
   // Обработка изменений полей формы
@@ -109,16 +109,31 @@ const GoodsForm = ({ editMode = false }) => {
       newErrors.article = 'Артикул обязателен';
     }
     
-    if (form.price <= 0) {
+    if (!form.url.trim()) {
+      newErrors.url = 'URL обязателен';
+    }
+    
+    if (!form.price || form.price <= 0) {
       newErrors.price = 'Цена должна быть больше нуля';
     }
     
-    if (!validateImageUrl(form.image)) {
+    if (form.cashback_percent < 0 || form.cashback_percent > 100) {
+      newErrors.cashback_percent = 'Процент кэшбэка должен быть от 0 до 100';
+    }
+    
+    if (form.min_daily < 1) {
+      newErrors.min_daily = 'Минимальное количество должно быть не менее 1';
+    }
+    
+    if (form.max_daily < form.min_daily) {
+      newErrors.max_daily = 'Максимальное количество должно быть не меньше минимального';
+    }
+    
+    if (form.image && !validateImageUrl(form.image)) {
       newErrors.image = 'Некорректный URL изображения';
     }
     
-    // Проверяем, что дата окончания позже даты начала, если обе указаны
-    if (form.start_date && form.end_date && new Date(form.end_date) <= new Date(form.start_date)) {
+    if (form.start_date && form.end_date && new Date(form.start_date) > new Date(form.end_date)) {
       newErrors.end_date = 'Дата окончания должна быть позже даты начала';
     }
     
@@ -129,20 +144,35 @@ const GoodsForm = ({ editMode = false }) => {
   // Отправка формы
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSubmitting(true);
     
     if (!validateForm()) {
-      toast.error('Пожалуйста, исправьте ошибки в форме');
+      setSubmitting(false);
       return;
     }
     
-    setSubmitting(true);
-    
     try {
-      // Подготавливаем данные для отправки
+      // Формируем данные для отправки
       const goodsData = {
-        ...form,
-        price: parseFloat(form.price)
+        name: form.name.trim(),
+        article: form.article.trim(),
+        url: form.url.trim(),
+        price: parseInt(form.price, 10),
+        cashback_percent: parseInt(form.cashback_percent, 10) || 0,
+        purchase_guide: form.purchase_guide.trim(),
+        image: form.image.trim(),
+        min_daily: parseInt(form.min_daily, 10) || 1,
+        max_daily: parseInt(form.max_daily, 10) || 10
       };
+      
+      // Добавляем даты, если они указаны
+      if (form.start_date) {
+        goodsData.start_date = form.start_date;
+      }
+      
+      if (form.end_date) {
+        goodsData.end_date = form.end_date;
+      }
       
       // Создаем новый товар или обновляем существующий
       if (editMode) {
@@ -226,6 +256,27 @@ const GoodsForm = ({ editMode = false }) => {
           />
           {errors.article && <p className={errorClass}>{errors.article}</p>}
         </div>
+
+        {/* URL */}
+        <div>
+          <label htmlFor="url" className={labelClass}>
+            URL*
+          </label>
+          <input
+            type="text"
+            id="url"
+            name="url"
+            value={form.url}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Введите URL товара"
+            required
+          />
+          {errors.url && <p className={errorClass}>{errors.url}</p>}
+        </div>
+        
+        
+        
         
         {/* Цена */}
         <div>
@@ -247,19 +298,39 @@ const GoodsForm = ({ editMode = false }) => {
           {errors.price && <p className={errorClass}>{errors.price}</p>}
         </div>
         
-        {/* Описание */}
+        {/* Процент кэшбэка */}
         <div>
-          <label htmlFor="description" className={labelClass}>
-            Описание
+          <label htmlFor="cashback_percent" className={labelClass}>
+            Процент кэшбэка (%)
+          </label>
+          <input
+            type="number"
+            id="cashback_percent"
+            name="cashback_percent"
+            value={form.cashback_percent}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Введите процент кэшбэка"
+            min="0"
+            max="100"
+            step="1"
+          />
+          {errors.cashback_percent && <p className={errorClass}>{errors.cashback_percent}</p>}
+        </div>
+        
+        {/* Инструкция по покупке */}
+        <div>
+          <label htmlFor="purchase_guide" className={labelClass}>
+            Инструкция по покупке
           </label>
           <textarea
-            id="description"
-            name="description"
-            value={form.description}
+            id="purchase_guide"
+            name="purchase_guide"
+            value={form.purchase_guide}
             onChange={handleChange}
-            className={`${inputClass} min-h-[150px]`}
-            placeholder="Введите описание товара"
-            rows="5"
+            rows="4"
+            className={inputClass}
+            placeholder="Введите инструкцию по покупке товара"
           />
         </div>
         
@@ -275,7 +346,7 @@ const GoodsForm = ({ editMode = false }) => {
             value={form.image}
             onChange={handleChange}
             className={inputClass}
-            placeholder="Вставьте URL изображения товара"
+            placeholder="Введите URL изображения товара"
           />
           {errors.image && <p className={errorClass}>{errors.image}</p>}
           
@@ -295,13 +366,13 @@ const GoodsForm = ({ editMode = false }) => {
           )}
         </div>
         
-        {/* Дата начала (МСК) */}
+        {/* Дата начала */}
         <div>
           <label htmlFor="start_date" className={labelClass}>
-            Дата начала (МСК)
+            Дата начала
           </label>
           <input
-            type="datetime-local"
+            type="date"
             id="start_date"
             name="start_date"
             value={form.start_date}
@@ -309,46 +380,64 @@ const GoodsForm = ({ editMode = false }) => {
             className={inputClass}
           />
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Указывается московское время (UTC+3)
+            Укажите дату начала действия товара
           </p>
         </div>
         
-        {/* Дата окончания (МСК) */}
+        {/* Дата окончания */}
         <div>
           <label htmlFor="end_date" className={labelClass}>
-            Дата окончания (МСК)
+            Дата окончания
           </label>
           <input
-            type="datetime-local"
+            type="date"
             id="end_date"
             name="end_date"
             value={form.end_date}
             onChange={handleChange}
             className={inputClass}
           />
-          {errors.end_date && <p className={errorClass}>{errors.end_date}</p>}
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Указывается московское время (UTC+3)
+            Укажите дату окончания действия товара
           </p>
         </div>
         
-        {/* Активность */}
-        <div className="flex items-center space-x-3">
-          <input
-            type="checkbox"
-            id="is_active"
-            name="is_active"
-            checked={form.is_active}
-            onChange={handleChange}
-            className="h-6 w-6 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            style={{
-              accentColor: isDarkMode ? '#3b82f6' : '',
-              cursor: 'pointer'
-            }}
-          />
-          <label htmlFor="is_active" className={`${labelClass} mb-0 cursor-pointer`}>
-            Товар активен
+        {/* Минимальное количество в день */}
+        <div>
+          <label htmlFor="min_daily" className={labelClass}>
+            Минимальное количество в день
           </label>
+          <input
+            type="number"
+            id="min_daily"
+            name="min_daily"
+            value={form.min_daily}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Минимальное количество товаров в день"
+            min="1"
+            step="1"
+          />
+          {errors.min_daily && <p className={errorClass}>{errors.min_daily}</p>}
+        </div>
+        
+        {/* Максимальное количество в день */}
+        <div>
+          <label htmlFor="max_daily" className={labelClass}>
+            Максимальное количество в день
+          </label>
+          <input
+            type="number"
+            id="max_daily"
+            name="max_daily"
+            value={form.max_daily}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Максимальное количество товаров в день"
+            min="1"
+            step="1"
+          />
+          {errors.max_daily && <p className={errorClass}>{errors.max_daily}</p>}
         </div>
         
         {/* Кнопки действий */}

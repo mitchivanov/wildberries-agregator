@@ -11,6 +11,7 @@ const Catalog = () => {
   const [goods, setGoods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
+  const [availabilityData, setAvailabilityData] = useState({});
 
   useEffect(() => {
     loadGoods();
@@ -26,15 +27,35 @@ const Catalog = () => {
     setIsSearching(false);
     try {
       const data = await getGoods();
-      if (data && Array.isArray(data)) {
-        // Фильтруем только активные товары для публичного каталога
-        setGoods(data.filter(item => item.is_active));
-      } else {
-        console.error('Получены некорректные данные:', data);
-        setGoods([]);
+      if (data) {
+        // Фильтруем только активные товары
+        const activeGoods = data.filter(item => item.is_active);
+        setGoods(activeGoods);
+        
+        // Получаем данные о доступности для всех товаров на сегодня
+        const today = new Date().toISOString().split('T')[0];
+        const availabilityMap = {};
+        
+        activeGoods.forEach(item => {
+          if (item.daily_availability && item.daily_availability.length > 0) {
+            const todayAvailability = item.daily_availability.find(av => 
+              av.date.split('T')[0] === today
+            );
+            availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
+          } else {
+            availabilityMap[item.id] = 0;
+          }
+        });
+        
+        setAvailabilityData(availabilityMap);
+        
+        if (data.length > 0 && activeGoods.length === 0) {
+          toast.info('В настоящее время нет доступных товаров');
+        }
       }
     } catch (err) {
-      toast.error(`Ошибка при загрузке товаров: ${err.message}`);
+      console.error('Ошибка при загрузке товаров:', err);
+      toast.error('Ошибка при загрузке товаров');
     } finally {
       setLoading(false);
     }
@@ -49,14 +70,39 @@ const Catalog = () => {
     setIsSearching(true);
     try {
       const data = await searchGoods(query);
-      if (data) {
-        setGoods(data.filter(item => item.is_active));
-      }
-    } catch (err) {
-      toast.error(`Ошибка при поиске: ${err.message}`);
+      // Фильтруем только активные товары
+      const activeGoods = data.filter(item => item.is_active);
+      setGoods(activeGoods);
+      
+      // Получаем данные о доступности для всех найденных товаров на сегодня
+      const today = new Date().toISOString().split('T')[0];
+      const availabilityMap = {};
+      
+      activeGoods.forEach(item => {
+        if (item.daily_availability && item.daily_availability.length > 0) {
+          const todayAvailability = item.daily_availability.find(av => 
+            av.date.split('T')[0] === today
+          );
+          availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
+        } else {
+          availabilityMap[item.id] = 0;
+        }
+      });
+      
+      setAvailabilityData(availabilityMap);
+    } catch (error) {
+      console.error('Ошибка при поиске товаров:', error);
+      toast.error('Не удалось выполнить поиск');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Функция для расчета цены с учетом кэшбека
+  const calculatePriceWithCashback = (price, cashbackPercent) => {
+    if (!cashbackPercent) return price;
+    const discountAmount = (price * cashbackPercent) / 100;
+    return Math.round(price - discountAmount);
   };
 
   return (
@@ -110,26 +156,50 @@ const Catalog = () => {
                   className="h-full w-full object-cover"
                   onError={(e) => {
                     e.target.onerror = null;
-                    e.target.src = "https://via.placeholder.com/400x300?text=Нет+фото";
+                    e.target.src = 'https://via.placeholder.com/300x200?text=Нет+изображения';
                   }}
                 />
               </div>
               <div className="p-4">
-                <h3 className={`text-lg font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                <p className={`text-sm mb-2 line-clamp-2 ${
+                  isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   {item.name}
-                </h3>
-                <p className={`text-sm mb-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                </p>
+                <p className={`text-xs mb-3 ${
+                  isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                }`}>
                   Артикул: {item.article}
                 </p>
-                <div className="flex justify-between items-center">
-                  <span className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                    {item.price.toLocaleString()} ₽
-                  </span>
-                  <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
-                    isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    Подробнее
-                  </span>
+                <div className="flex flex-col space-y-2">
+                  <div className="flex justify-between items-center">
+                    {item.cashback_percent > 0 ? (
+                      <div className="flex flex-col">
+                        {/* Цена с учетом кэшбека (главная) */}
+                        <span className={`text-lg font-bold ${isDarkMode ? 'text-green-400' : 'text-green-600'}`}>
+                          {calculatePriceWithCashback(item.price, item.cashback_percent).toLocaleString()} ₽
+                        </span>
+                        {/* Цена без кэшбека (зачеркнутая) */}
+                        <span className={`text-sm line-through ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                          {item.price.toLocaleString()} ₽
+                        </span>
+                      </div>
+                    ) : (
+                      <span className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                        {item.price.toLocaleString()} ₽
+                      </span>
+                    )}
+                    <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
+                      isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {availabilityData[item.id] ? `Доступно: ${availabilityData[item.id]} шт.` : 'Нет в наличии'}
+                    </span>
+                  </div>
+                  {item.cashback_percent > 0 && (
+                    <div className="text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}">
+                      Кэшбек {item.cashback_percent}%
+                    </div>
+                  )}
                 </div>
               </div>
             </Link>

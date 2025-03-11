@@ -9,5 +9,8 @@ done
 # Применяем миграции
 alembic upgrade head
 
+# Запускаем воркер активности товаров в фоновом режиме
+python worker.py &
+
 # Запускаем приложение
 exec uvicorn main:app --host 0.0.0.0 --port 8000 

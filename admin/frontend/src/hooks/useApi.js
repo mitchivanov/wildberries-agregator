@@ -5,7 +5,7 @@ import { useTelegram } from './useTelegram';
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: 'https://1657-89-169-52-137.ngrok-free.app/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -155,6 +155,64 @@ export const useApi = () => {
     return result;
   }, [request]);
 
+  // Получение всех бронирований
+  const getAllReservations = async () => {
+    try {
+      const response = await axios.get('/api/reservations/');
+      return response.data;
+    } catch (error) {
+      handleApiError(error);
+      throw error;
+    }
+  };
+
+  // Функция для получения всей доступности товаров
+  const getAllAvailability = useCallback(async () => {
+    console.log('Запрос данных о доступности товаров');
+    
+    // Проверяем кэш перед запросом
+    const cacheKey = '/availability/';
+    if (queryCache.has(cacheKey)) {
+      console.log('Возвращаем кэшированные данные о доступности');
+      return queryCache.get(cacheKey);
+    }
+    
+    try {
+      const response = await api.get('/availability/');
+      
+      // Дополнительный запрос для получения информации о товарах
+      const goodsResponse = await api.get('/goods/');
+      const goodsMap = {};
+      
+      // Создаем карту товаров по ID для быстрого доступа
+      if (goodsResponse.data) {
+        goodsResponse.data.forEach(goods => {
+          goodsMap[goods.id] = {
+            name: goods.name,
+            article: goods.article
+          };
+        });
+      }
+      
+      // Добавляем информацию о товарах к данным о доступности
+      const enrichedData = response.data.map(item => ({
+        ...item,
+        goods_name: goodsMap[item.goods_id]?.name || null,
+        goods_article: goodsMap[item.goods_id]?.article || null
+      }));
+      
+      // Сохраняем в кэш
+      queryCache.set(cacheKey, enrichedData);
+      
+      return enrichedData;
+    } catch (error) {
+      const errorMessage = error.response?.data?.detail || error.message;
+      console.error('Ошибка при получении данных о доступности:', errorMessage);
+      toast.error(`Ошибка: ${errorMessage}`);
+      throw error;
+    }
+  }, []);
+
   return {
     loading,
     error,
@@ -165,5 +223,7 @@ export const useApi = () => {
     updateGoods,
     deleteGoods,
     reserveGoods,
+    getAllReservations,
+    getAllAvailability,
   };
 }; 
