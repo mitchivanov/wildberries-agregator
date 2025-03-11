@@ -186,6 +186,14 @@ async def create_goods(goods: GoodsCreate, db: AsyncSession = Depends(get_db)):
         db_goods.max_daily
     )
     
+    # Загружаем созданную доступность отдельным запросом
+    availability_query = select(DailyAvailability).filter(
+        DailyAvailability.goods_id == db_goods.id
+    ).order_by(DailyAvailability.date)
+    
+    availability_result = await db.execute(availability_query)
+    availability = availability_result.scalars().all()
+    
     # Создаем словарь с данными товара для ответа
     goods_dict = {
         "id": db_goods.id,
@@ -201,7 +209,17 @@ async def create_goods(goods: GoodsCreate, db: AsyncSession = Depends(get_db)):
         "end_date": db_goods.end_date,
         "min_daily": db_goods.min_daily,
         "max_daily": db_goods.max_daily,
-        "daily_availability": [],  # Пустые списки вместо асинхронной загрузки
+        "created_at": db_goods.created_at,
+        "updated_at": db_goods.updated_at,
+        "daily_availability": [
+            {
+                "id": item.id,
+                "goods_id": item.goods_id,
+                "date": item.date,
+                "available_quantity": item.available_quantity
+            }
+            for item in availability
+        ],
         "reservations": []
     }
     
