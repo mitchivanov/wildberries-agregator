@@ -23,8 +23,8 @@ services:
     build: ./admin/backend
     environment:
       DATABASE_URL: postgresql+asyncpg://socialist:revolution2023@postgres:5432/wb_aggregator
-      BOT_TOKEN: ${BOT_TOKEN}
-      TELEGRAM_WEBAPP_URL: https://develooper.online
+      BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_WEBAPP_URL: ${WEBAPP_URL}
       DEVELOPMENT_MODE: "False"
       BOT_API_URL: http://bot:8001
     depends_on:
@@ -42,7 +42,7 @@ services:
     expose:
       - "80"
     environment:
-      VITE_API_URL: https://develooper.online/api
+      VITE_API_URL: ${API_URL}
     volumes:
       - ./admin/frontend/nginx.conf:/etc/nginx/conf.d/default.conf
       - certbot-data:/etc/letsencrypt:ro
@@ -54,7 +54,7 @@ services:
     build:
       context: ./admin/bot
     environment:
-      BOT_TOKEN: ${BOT_TOKEN}
+      BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       WEBAPP_URL: ${WEBAPP_URL}
       SUPER_ADMIN_ID: ${SUPER_ADMIN_ID}
     depends_on:
@@ -80,6 +80,9 @@ services:
       args:
         DOMAIN_EMAIL: ${DOMAIN_EMAIL}
         DOMAIN_URL: ${DOMAIN_URL}
+    networks:
+      - frontend-network
+
   nginx:
     image: nginx:alpine
     ports:
