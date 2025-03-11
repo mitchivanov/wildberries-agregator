@@ -1,6 +1,25 @@
 version: '3.8'
 
 services:
+  init-dhparams:
+    image: certbot/certbot
+    restart: "no"
+    entrypoint: /bin/sh
+    command: -c 'test -f /etc/letsencrypt/ssl-dhparams.pem || openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048'
+    volumes:
+      - certbot-data:/etc/letsencrypt
+
+  certbot-oneshot:
+    image: certbot/certbot
+    restart: "no"
+    entrypoint: /bin/sh
+    command: -c 'certbot certonly --standalone -d develooper.ru --email ${DOMAIN_EMAIL} --rsa-key-size 2048 --agree-tos --force-renewal'
+    ports:
+      - "80:80"
+    volumes:
+      - certbot-data:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+
   postgres:
     image: postgres:15-alpine
     environment:
@@ -62,39 +81,42 @@ services:
     networks:
       - backend-network
 
-  certbot:
-    ports:
-      - "6000:80"
-    env_file:
-      - .env
-    volumes:
-      - ./admin/nginx/:/etc/nginx/
-    build:
-      context: ./admin/certbot
-      dockerfile: Dockerfile
-      args:
-        DOMAIN_EMAIL: ${DOMAIN_EMAIL}
-        DOMAIN_URL: ${DOMAIN_URL}
-    networks:
-      - frontend-network
-
   nginx:
     image: nginx:alpine
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./admin/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./admin/nginx/cert.pem:/etc/cert.pem
-      - ./admin/nginx/key.pem:/etc/key.pem
+      - ./admin/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - certbot-data:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot
       - ./admin/frontend/dist:/usr/share/nginx/html
     depends_on:
-      - frontend
-      - backend
-      - bot
+      init-dhparams:
+        condition: service_completed_successfully
+      certbot-oneshot:
+        condition: service_completed_successfully
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
+      bot:
+        condition: service_started
     networks:
       - frontend-network
       - backend-network
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+
+  certbot:
+    image: certbot/certbot
+    entrypoint: /bin/sh
+    command: -c 'trap exit TERM; while :; do certbot renew; sleep 24h & wait $${!}; done;'
+    volumes:
+      - certbot-data:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    depends_on:
+      nginx:
+        condition: service_started
 
 volumes:
   postgres_data:
