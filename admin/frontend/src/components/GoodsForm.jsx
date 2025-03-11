@@ -69,8 +69,16 @@ const GoodsForm = ({ editMode = false }) => {
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     
-    // Для checkbox используем checked вместо value
-    const fieldValue = type === 'checkbox' ? checked : value;
+    let fieldValue;
+    
+    // Для числовых полей обеспечиваем преобразование в число
+    if (name === 'min_daily' || name === 'max_daily' || name === 'price' || name === 'cashback_percent') {
+      // Преобразуем строку в число, пустую строку преобразуем в 0
+      fieldValue = value === '' ? '' : Number(value);
+    } else {
+      // Для checkbox используем checked вместо value
+      fieldValue = type === 'checkbox' ? checked : value;
+    }
     
     setForm(prev => ({
       ...prev,
@@ -121,11 +129,22 @@ const GoodsForm = ({ editMode = false }) => {
       newErrors.cashback_percent = 'Процент кэшбэка должен быть от 0 до 100';
     }
     
-    if (form.min_daily < 1) {
+    // Преобразуем значения в числа для корректного сравнения
+    const minDaily = Number(form.min_daily);
+    const maxDaily = Number(form.max_daily);
+    
+    console.log('Validation - minDaily:', minDaily, 'type:', typeof minDaily);
+    console.log('Validation - maxDaily:', maxDaily, 'type:', typeof maxDaily);
+    
+    if (isNaN(minDaily) || minDaily < 1) {
       newErrors.min_daily = 'Минимальное количество должно быть не менее 1';
     }
     
-    if (form.max_daily < form.min_daily) {
+    if (isNaN(maxDaily) || maxDaily < 1) {
+      newErrors.max_daily = 'Максимальное количество должно быть не менее 1';
+    }
+    
+    if (!isNaN(minDaily) && !isNaN(maxDaily) && minDaily > maxDaily) {
       newErrors.max_daily = 'Максимальное количество должно быть не меньше минимального';
     }
     
@@ -135,13 +154,6 @@ const GoodsForm = ({ editMode = false }) => {
     
     if (form.start_date && form.end_date && new Date(form.start_date) > new Date(form.end_date)) {
       newErrors.end_date = 'Дата окончания должна быть позже даты начала';
-    }
-    
-    const minDaily = parseInt(form.min_daily, 10);
-    const maxDaily = parseInt(form.max_daily, 10);
-    
-    if (!isNaN(minDaily) && !isNaN(maxDaily) && minDaily > maxDaily) {
-      newErrors.max_daily = 'Максимальное количество должно быть не меньше минимального';
     }
     
     setErrors(newErrors);
@@ -162,12 +174,14 @@ const GoodsForm = ({ editMode = false }) => {
       // Формируем данные для отправки
       const goodsData = {
         ...form,
-        // Преобразуем строки в числа
-        price: parseInt(form.price, 10),
-        cashback_percent: parseInt(form.cashback_percent, 10),
-        min_daily: parseInt(form.min_daily, 10),
-        max_daily: parseInt(form.max_daily, 10)
+        // Преобразуем поля в числа
+        price: Number(form.price),
+        cashback_percent: Number(form.cashback_percent),
+        min_daily: Number(form.min_daily),
+        max_daily: Number(form.max_daily)
       };
+      
+      console.log('Submitting form data:', goodsData);
       
       // Добавляем даты, если они указаны
       if (form.start_date) {
@@ -190,6 +204,7 @@ const GoodsForm = ({ editMode = false }) => {
       // Возвращаемся к списку товаров
       navigate('/admin/goods');
     } catch (err) {
+      console.error('Error details:', err);
       toast.error(`Ошибка при ${editMode ? 'обновлении' : 'создании'} товара: ${err.message}`);
     } finally {
       setSubmitting(false);
@@ -418,9 +433,9 @@ const GoodsForm = ({ editMode = false }) => {
             value={form.min_daily}
             onChange={handleChange}
             className={inputClass}
-            placeholder="Минимальное количество товаров в день"
             min="1"
             step="1"
+            required
           />
           {errors.min_daily && <p className={errorClass}>{errors.min_daily}</p>}
         </div>
@@ -437,9 +452,9 @@ const GoodsForm = ({ editMode = false }) => {
             value={form.max_daily}
             onChange={handleChange}
             className={inputClass}
-            placeholder="Максимальное количество товаров в день"
             min="1"
             step="1"
+            required
           />
           {errors.max_daily && <p className={errorClass}>{errors.max_daily}</p>}
         </div>
