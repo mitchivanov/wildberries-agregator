@@ -213,6 +213,20 @@ export const useApi = () => {
     }
   }, []);
 
+  // Функция для маскирования артикула (последние 4 цифры видны)
+  const maskArticle = useCallback((article) => {
+    if (!article) return '';
+    
+    // Если артикул короче 4 символов, просто возвращаем его
+    if (article.length <= 4) return article;
+    
+    // Иначе маскируем все символы кроме последних 4
+    const visiblePart = article.slice(-4);
+    const maskedPart = '*'.repeat(article.length - 4);
+    
+    return maskedPart + visiblePart;
+  }, []);
+
   return {
     loading,
     error,
@@ -225,5 +239,6 @@ export const useApi = () => {
     reserveGoods,
     getAllReservations,
     getAllAvailability,
+    maskArticle,
   };
 }; 

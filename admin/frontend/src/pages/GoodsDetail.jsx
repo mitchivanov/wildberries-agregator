@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 const GoodsDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getGoodsById, reserveGoods, loading } = useApi();
+  const { getGoodsById, reserveGoods, loading, maskArticle } = useApi();
   const { isDarkMode, webApp, user } = useTelegram();
   
   const [goods, setGoods] = useState(null);
@@ -119,7 +119,7 @@ const GoodsDetail = () => {
             </h1>
             
             <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              Артикул: {goods.article}
+              Артикул: {maskArticle(goods.article)}
             </p>
             
             {/* Цена товара */}

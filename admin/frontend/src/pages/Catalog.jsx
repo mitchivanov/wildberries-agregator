@@ -6,7 +6,7 @@ import SearchBar from '../components/SearchBar';
 import toast from 'react-hot-toast';
 
 const Catalog = () => {
-  const { getGoods, searchGoods } = useApi();
+  const { getGoods, searchGoods, maskArticle } = useApi();
   const { isDarkMode, webApp } = useTelegram();
   const [goods, setGoods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -169,7 +169,7 @@ const Catalog = () => {
                 <p className={`text-xs mb-3 ${
                   isDarkMode ? 'text-gray-400' : 'text-gray-500'
                 }`}>
-                  Артикул: {item.article}
+                  Артикул: {maskArticle(item.article)}
                 </p>
                 <div className="flex flex-col space-y-2">
                   <div className="flex justify-between items-center">
