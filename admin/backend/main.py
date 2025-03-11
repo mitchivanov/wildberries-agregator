@@ -186,7 +186,26 @@ async def create_goods(goods: GoodsCreate, db: AsyncSession = Depends(get_db)):
         db_goods.max_daily
     )
     
-    return db_goods
+    # Создаем словарь с данными товара для ответа
+    goods_dict = {
+        "id": db_goods.id,
+        "name": db_goods.name,
+        "price": db_goods.price,
+        "cashback_percent": db_goods.cashback_percent,
+        "article": db_goods.article,
+        "url": db_goods.url,
+        "image": db_goods.image,
+        "is_active": db_goods.is_active,
+        "purchase_guide": db_goods.purchase_guide,
+        "start_date": db_goods.start_date,
+        "end_date": db_goods.end_date,
+        "min_daily": db_goods.min_daily,
+        "max_daily": db_goods.max_daily,
+        "daily_availability": [],  # Пустые списки вместо асинхронной загрузки
+        "reservations": []
+    }
+    
+    return goods_dict
 
 @app.get("/goods/", response_model=List[GoodsResponse], dependencies=[Depends(verify_telegram_user)])
 async def read_all_goods(
