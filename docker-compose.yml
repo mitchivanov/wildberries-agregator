@@ -5,8 +5,8 @@ services:
     image: postgres:15-alpine
     environment:
       POSTGRES_DB: wb_aggregator
-      POSTGRES_USER: socialist
-      POSTGRES_PASSWORD: revolution2023
+      POSTGRES_USER: ${POSTGRES_USER:-socialist}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-revolution2023}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -18,13 +18,16 @@ services:
       - backend-network
 
   backend:
-    build: ./admin/backend
+    build:
+      context: ./admin/backend
+    restart: always
     environment:
-      DATABASE_URL: postgresql+asyncpg://socialist:revolution2023@postgres:5432/wb_aggregator
-      BOT_TOKEN: 7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc
-      TELEGRAM_WEBAPP_URL: https://develooper.online
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_WEBAPP_URL: ${TELEGRAM_WEBAPP_URL}
       DEVELOPMENT_MODE: "False"
       BOT_API_URL: http://bot:8080
+      SUPER_ADMIN_IDS: ${SUPER_ADMIN_IDS}
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,41 +38,41 @@ services:
       - frontend-network
 
   frontend:
-    build: ./admin/frontend
-    environment:
-      VITE_API_URL: https://develooper.online/api
+    build:
+      context: ./admin/frontend
+    restart: always
     volumes:
-      - ./admin/frontend/nginx.conf:/etc/nginx/conf.d/default.conf
-      - certbot-data:/etc/letsencrypt:ro
-      - certbot-www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - DOMAIN_URL=${DOMAIN_URL}
+      - API_URL=${API_URL}
+      - WEBAPP_URL=${WEBAPP_URL}
     depends_on:
       - backend
-    networks: 
+    networks:
       - frontend-network
 
   bot:
     build: ./admin/bot
     environment:
-      TELEGRAM_BOT_TOKEN: 7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc
-      WEBAPP_URL: https://develooper.online
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      WEBAPP_URL: ${TELEGRAM_WEBAPP_URL}
+      SUPER_ADMIN_IDS: ${SUPER_ADMIN_IDS}
     networks:
       - backend-network
 
-  certbot:
-    image: certbot/certbot
-    volumes:
-      - certbot-data:/etc/letsencrypt
-      - certbot-www:/var/www/certbot
-    command: certonly --webroot --webroot-path=/var/www/certbot --email michaelivanovv@gmail.com --agree-tos --no-eff-email -d develooper.online
-
 volumes:
   postgres_data:
+  backend-data:
   certbot-data:
   certbot-www:
 
 networks:
   backend-network:
-  frontend-network: 
+  frontend-network:
+  app-network:
+    driver: bridge
