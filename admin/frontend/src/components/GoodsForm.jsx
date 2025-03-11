@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useTelegram } from '../hooks/useTelegram';
 import { toast } from 'react-hot-toast';
-import { useTheme } from '../hooks/useTheme';
 import { useToast } from '../hooks/useToast';
 
 const GoodsForm = ({ editMode = false }) => {
@@ -16,7 +15,6 @@ const GoodsForm = ({ editMode = false }) => {
   const [urlToFetch, setUrlToFetch] = useState('');
   const [isUrlFormVisible, setIsUrlFormVisible] = useState(!id);
   const [urlLoading, setUrlLoading] = useState(false);
-  const { isDarkMode: themeIsDarkMode } = useTheme();
   const { toast: useToastToast } = useToast();
   const { parseWbProduct } = useApi();
 
@@ -239,13 +237,13 @@ const GoodsForm = ({ editMode = false }) => {
 
   // Классы для темной/светлой темы
   const inputClass = `w-full p-3 rounded-md border text-lg ${
-    themeIsDarkMode 
+    isDarkMode 
       ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
       : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
   } focus:ring-2 focus:ring-blue-500 focus:border-blue-500`;
   
   const labelClass = `block text-lg font-medium mb-2 ${
-    themeIsDarkMode ? 'text-gray-200' : 'text-gray-700'
+    isDarkMode ? 'text-gray-200' : 'text-gray-700'
   }`;
   
   const errorClass = 'mt-1 text-red-600 dark:text-red-400 text-sm';
@@ -254,7 +252,7 @@ const GoodsForm = ({ editMode = false }) => {
     return (
       <div className="text-center py-10">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-        <p className={`mt-2 ${themeIsDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка данных...</p>
+        <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка данных...</p>
       </div>
     );
   }
@@ -262,11 +260,11 @@ const GoodsForm = ({ editMode = false }) => {
   // Если форма URL видима, показываем её
   if (isUrlFormVisible && !editMode) {
     return (
-      <div className={`w-full max-w-4xl mx-auto ${themeIsDarkMode ? 'text-white' : 'text-gray-900'}`}>
+      <div className={`w-full max-w-4xl mx-auto ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
         <h1 className="text-2xl font-bold mb-6">Добавление нового товара</h1>
         
         <div className="mb-6 p-6 rounded-lg border shadow-sm bg-opacity-50 backdrop-blur-sm 
-          ${themeIsDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}">
+          ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}">
           <p className="mb-4">Введите URL товара с Wildberries для автозаполнения данных:</p>
           
           <div className="flex space-x-2">
@@ -276,7 +274,7 @@ const GoodsForm = ({ editMode = false }) => {
               onChange={(e) => setUrlToFetch(e.target.value)}
               placeholder="https://www.wildberries.ru/catalog/123456/detail.aspx"
               className={`flex-1 p-3 rounded-md border text-lg ${
-                themeIsDarkMode 
+                isDarkMode 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
               }`}
@@ -303,7 +301,7 @@ const GoodsForm = ({ editMode = false }) => {
             <button
               onClick={() => setIsUrlFormVisible(false)}
               className={`px-4 py-2 rounded-md ${
-                themeIsDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
+                isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
               }`}
             >
               Заполнить форму вручную
@@ -312,7 +310,7 @@ const GoodsForm = ({ editMode = false }) => {
             <button
               onClick={() => navigate('/admin/goods')}
               className={`px-4 py-2 rounded-md ${
-                themeIsDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
+                isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
               }`}
             >
               Вернуться к списку
@@ -324,7 +322,7 @@ const GoodsForm = ({ editMode = false }) => {
   }
 
   return (
-    <div className={`w-full max-w-4xl mx-auto ${themeIsDarkMode ? 'text-white' : 'text-gray-900'}`}>
+    <div className={`w-full max-w-4xl mx-auto ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
       <h1 className="text-2xl font-bold mb-6">
         {editMode ? 'Редактирование товара' : 'Добавление нового товара'}
       </h1>
