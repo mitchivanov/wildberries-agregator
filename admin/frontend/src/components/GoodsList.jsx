@@ -10,7 +10,7 @@ const GoodsList = () => {
   const { getGoods, searchGoods, deleteGoods } = useApi();
   const { isDarkMode, webApp } = useTelegram();
   const navigate = useNavigate();
-  
+
   const [goods, setGoods] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -24,21 +24,21 @@ const GoodsList = () => {
     try {
       const data = await getGoods();
       if (data) setGoods(data);
-      
+
       // Проверяем, есть ли сохраненный ID для подсветки
       const savedHighlightId = localStorage.getItem('highlightedGoodsId');
       if (savedHighlightId) {
         setHighlightedGoodsId(parseInt(savedHighlightId));
-        
+
         // Очищаем после использования
         localStorage.removeItem('highlightedGoodsId');
-        
+
         // Прокручиваем к выделенному товару через небольшую задержку
         setTimeout(() => {
           const element = document.getElementById(`goods-row-${savedHighlightId}`);
           if (element) {
             element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
+
             // Анимация подсветки
             element.classList.add('highlight-animation');
             setTimeout(() => {
@@ -57,7 +57,7 @@ const GoodsList = () => {
 
   useEffect(() => {
     loadGoods();
-    
+
     // Настраиваем главную кнопку Telegram если доступно
     if (webApp) {
       webApp.MainButton.setParams({
@@ -65,14 +65,14 @@ const GoodsList = () => {
         color: '#0B63F6',
         text_color: '#ffffff'
       });
-      
+
       const handleMainButtonClick = () => {
         navigate('/goods/create');
       };
-      
+
       webApp.MainButton.onClick(handleMainButtonClick);
       webApp.MainButton.show();
-      
+
       return () => {
         webApp.MainButton.offClick(handleMainButtonClick);
         webApp.MainButton.hide();
@@ -85,7 +85,7 @@ const GoodsList = () => {
     if (!query.trim()) {
       return loadGoods();
     }
-    
+
     setLoading(true);
     setIsSearching(true);
     try {
@@ -110,8 +110,8 @@ const GoodsList = () => {
   };
 
   // Стили в зависимости от темы
-  const themeClasses = isDarkMode 
-    ? 'bg-gray-800 border-gray-700 text-white' 
+  const themeClasses = isDarkMode
+    ? 'bg-gray-800 border-gray-700 text-white'
     : 'bg-white border-gray-200 text-gray-700';
 
   return (
@@ -120,8 +120,14 @@ const GoodsList = () => {
         <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
           Управление товарами
         </h1>
-        <Link to="/goods/create" className="btn btn-primary">
-          Добавить товар
+        <Link
+          to="/admin/goods/create"
+          className={`block w-full text-center py-2 px-4 rounded ${isDarkMode
+              ? 'bg-blue-700 text-white hover:bg-blue-600'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+        >
+          Добавить новый товар
         </Link>
       </div>
 
@@ -138,13 +144,13 @@ const GoodsList = () => {
       ) : goods.length === 0 ? (
         <div className={`text-center py-10 rounded-lg shadow ${themeClasses}`}>
           <p>
-            {isSearching 
-              ? 'По вашему запросу ничего не найдено' 
+            {isSearching
+              ? 'По вашему запросу ничего не найдено'
               : 'Список товаров пуст'}
           </p>
           {isSearching && (
-            <button 
-              onClick={loadGoods} 
+            <button
+              onClick={loadGoods}
               className="mt-2 btn btn-secondary"
             >
               Вернуться к полному списку
@@ -159,11 +165,14 @@ const GoodsList = () => {
                 <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                   ID
                 </th>
-                <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                <th scope="col" className={`px-6 py-3 text-center text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                   Изображение
                 </th>
                 <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                   Название
+                </th>
+                <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                  Категория
                 </th>
                 <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                   Артикул
@@ -193,9 +202,9 @@ const GoodsList = () => {
             </thead>
             <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700 bg-gray-800' : 'divide-gray-200 bg-white'}`}>
               {goods.map((item) => (
-                <GoodsItem 
-                  key={item.id} 
-                  goods={item} 
+                <GoodsItem
+                  key={item.id}
+                  goods={item}
                   onDelete={handleDelete}
                   isHighlighted={item.id === highlightedGoodsId}
                   rowId={`goods-row-${item.id}`}

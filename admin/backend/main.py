@@ -5,10 +5,7 @@ from sqlalchemy.future import select
 from sqlalchemy import update, delete, or_
 from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import hashlib
-import hmac
-from urllib.parse import urlencode, parse_qsl
+from fastapi.security import HTTPBearer
 import os
 from datetime import datetime, timedelta
 import random
@@ -21,12 +18,14 @@ from worker import update_goods_activity
 import time
 from aiohttp import ClientSession
 from sqlalchemy.orm import selectinload
+from parser import parse_wildberries_url
+import math
 
 from database import get_db, init_db, close_db, AsyncScopedSession
-from models import Goods, Reservation, DailyAvailability
+from models import Goods, Reservation, DailyAvailability, Category
 from schemas import (
     GoodsCreate, GoodsUpdate, GoodsResponse,ReservationCreate, ReservationResponse,
-    DailyAvailabilityResponse
+    DailyAvailabilityResponse, CategoryCreate, CategoryUpdate, CategoryResponse
 )
 
 # Настройка логирования
@@ -58,7 +57,7 @@ app = FastAPI(title="Goods Admin API", lifespan=lifespan)
 # Добавляем CORS для обработки запросов с нового домена
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://develooper.ru"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -261,9 +260,17 @@ async def read_all_goods(
     # Загружаем доступность товаров на сегодняшний день
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     
+    # Загружаем информацию о категориях
+    category_ids = [goods.category_id for goods in goods_list if goods.category_id is not None]
+    category_dict = {}
+    
+    if category_ids:
+        category_query = select(Category).filter(Category.id.in_(category_ids))
+        category_result = await db.execute(category_query)
+        category_dict = {category.id: category for category in category_result.scalars().all()}
+    
     response_goods = []
     
-    # Для каждого товара явно загружаем доступность
     for goods in goods_list:
         # Выполняем отдельный запрос для получения доступности
         availability_query = select(DailyAvailability).filter(
@@ -298,7 +305,13 @@ async def read_all_goods(
                     "available_quantity": item.available_quantity
                 }
                 for item in availability
-            ]
+            ],
+            "category": {
+                "id": category_dict.get(goods.category_id, None).id,
+                "name": category_dict.get(goods.category_id, None).name,
+                "description": category_dict.get(goods.category_id, None).description,
+                "is_active": category_dict.get(goods.category_id, None).is_active
+            } if goods.category_id else None
         }
         
         response_goods.append(goods_dict)
@@ -356,6 +369,12 @@ async def read_goods(goods_id: int, db: AsyncSession = Depends(get_db)):
     reservations_result = await db.execute(reservations_query)
     reservations = reservations_result.scalars().all()
     
+    # Получаем информацию о категории
+    category = None
+    if goods.category_id:
+        category_result = await db.execute(select(Category).filter(Category.id == goods.category_id))
+        category = category_result.scalars().first()
+    
     # Создаем ответ в формате, который ожидает фронтенд
     goods_dict = {
         "id": goods.id,
@@ -391,7 +410,13 @@ async def read_goods(goods_id: int, db: AsyncSession = Depends(get_db)):
                 "reserved_at": item.reserved_at
             }
             for item in reservations
-        ]
+        ],
+        "category": {
+            "id": category.id,
+            "name": category.name,
+            "description": category.description,
+            "is_active": category.is_active
+        } if category else None
     }
     
     return goods_dict
@@ -417,8 +442,9 @@ async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession 
         )
         await db.commit()
     
-    # Получаем обновленный товар
-    result = await db.execute(select(Goods).filter(Goods.id == goods_id))
+    # Получаем обновленный товар с информацией о категории
+    query = select(Goods).options(selectinload(Goods.category)).filter(Goods.id == goods_id)
+    result = await db.execute(query)
     updated_goods = result.scalars().first()
     
     # Перегенерируем доступность товара по дням, если изменились даты или мин/макс значения
@@ -432,7 +458,61 @@ async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession 
             updated_goods.max_daily
         )
     
-    return updated_goods
+    # Загружаем связанные данные
+    availability_query = select(DailyAvailability).filter(DailyAvailability.goods_id == goods_id)
+    availability_result = await db.execute(availability_query)
+    availability = availability_result.scalars().all()
+    
+    reservations_query = select(Reservation).filter(Reservation.goods_id == goods_id)
+    reservations_result = await db.execute(reservations_query)
+    reservations = reservations_result.scalars().all()
+    
+    # Формируем полный ответ как в методе read_goods
+    goods_dict = {
+        "id": updated_goods.id,
+        "name": updated_goods.name,
+        "price": updated_goods.price,
+        "cashback_percent": updated_goods.cashback_percent,
+        "article": updated_goods.article,
+        "url": updated_goods.url,
+        "image": updated_goods.image,
+        "is_active": updated_goods.is_active,
+        "purchase_guide": updated_goods.purchase_guide,
+        "start_date": updated_goods.start_date,
+        "end_date": updated_goods.end_date,
+        "min_daily": updated_goods.min_daily,
+        "max_daily": updated_goods.max_daily,
+        "created_at": updated_goods.created_at,
+        "updated_at": updated_goods.updated_at,
+        "category_id": updated_goods.category_id,
+        "daily_availability": [
+            {
+                "id": item.id,
+                "goods_id": item.goods_id,
+                "date": item.date,
+                "available_quantity": item.available_quantity
+            }
+            for item in availability
+        ],
+        "reservations": [
+            {
+                "id": item.id,
+                "user_id": item.user_id,
+                "goods_id": item.goods_id,
+                "quantity": item.quantity,
+                "reserved_at": item.reserved_at
+            }
+            for item in reservations
+        ],
+        "category": {
+            "id": updated_goods.category.id,
+            "name": updated_goods.category.name,
+            "description": updated_goods.category.description,
+            "is_active": updated_goods.category.is_active
+        } if updated_goods.category else None
+    }
+    
+    return goods_dict
 
 @app.delete("/goods/{goods_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_goods(goods_id: int, db: AsyncSession = Depends(get_db)):
@@ -660,17 +740,43 @@ async def create_reservation(
     # Успешно возвращаем данные о бронировании
     return db_reservation
 
-@app.get("/user/reservations/", response_model=List[ReservationResponse])
+@app.get("/user/{user_id}/reservations/", response_model=List[ReservationResponse])
 async def get_user_reservations(
-    db: AsyncSession = Depends(get_db),
-    user_id: int = Depends(verify_telegram_user)
+    user_id: int,
+    db: AsyncSession = Depends(get_db)
 ):
     """Получить список бронирований пользователя"""
     query = select(Reservation).filter(Reservation.user_id == user_id)
     result = await db.execute(query)
     reservations = result.scalars().all()
     
-    return reservations
+    # Получаем информацию о товарах для отображения названий и других деталей
+    goods_ids = [item.goods_id for item in reservations]
+    goods_dict = {}
+    
+    if goods_ids:
+        goods_query = select(Goods).filter(Goods.id.in_(goods_ids))
+        goods_result = await db.execute(goods_query)
+        goods_dict = {goods.id: goods for goods in goods_result.scalars().all()}
+    
+    # Формируем ответ с включением данных о товаре
+    response_list = []
+    for item in reservations:
+        goods = goods_dict.get(item.goods_id)
+        reservation_dict = {
+            "id": item.id,
+            "user_id": item.user_id,
+            "goods_id": item.goods_id,
+            "quantity": item.quantity,
+            "reserved_at": item.reserved_at,
+            "goods_name": goods.name if goods else None,
+            "goods_image": goods.image if goods else None,
+            "goods_price": goods.price if goods else None,
+            "goods_cashback_percent": goods.cashback_percent if goods else None
+        }
+        response_list.append(reservation_dict)
+    
+    return response_list
 
 # Эндпоинт для проверки работоспособности API
 @app.get("/health")
@@ -851,6 +957,160 @@ async def cancel_reservation(
         delete(Reservation)
         .where(Reservation.id == reservation_id)
     )
+    await db.commit()
+    
+    return None
+
+@app.post("/parse-wildberries/")
+async def parse_wildberries(request_data: dict):
+    """Парсит данные о товаре с Wildberries по URL"""
+    url = request_data.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL не указан")
+    
+    try:
+        # Используем функцию из parser.py
+        result = await parse_wildberries_url(url)
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Не удалось получить информацию о товаре")
+            
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Ошибка при парсинге товара: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при парсинге товара: {str(e)}")
+
+
+@app.delete("/reservations/{reservation_id}/user/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def bot_cancel_reservation(reservation_id: int, user_id: int, db: AsyncSession = Depends(get_db)):
+    """Отмена бронирования по прямому запросу от бота"""
+    # Получаем бронирование
+    result = await db.execute(
+        select(Reservation)
+        .where(Reservation.id == reservation_id)
+        .options(selectinload(Reservation.goods))
+    )
+    reservation = result.scalars().first()
+    
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Бронирование не найдено")
+    
+    # Проверяем права пользователя
+    if reservation.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав для отмены бронирования")
+    
+    # Находим соответствующую запись о доступности
+    availability_result = await db.execute(
+        select(DailyAvailability)
+        .where(
+            DailyAvailability.goods_id == reservation.goods_id,
+            DailyAvailability.date == reservation.reserved_at.date()
+        )
+    )
+    daily_availability = availability_result.scalars().first()
+    
+    if daily_availability:
+        # Возвращаем товар в доступное количество
+        daily_availability.available_quantity += reservation.quantity
+        await db.commit()
+        logger.info(f"Возвращено {reservation.quantity} шт. товара {reservation.goods_id}")
+    
+    # Удаляем бронирование
+    await db.execute(
+        delete(Reservation)
+        .where(Reservation.id == reservation_id)
+    )
+    await db.commit()
+    
+    return None
+
+# Эндпоинты для категорий
+@app.post("/categories/", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_category(category: CategoryCreate, db: AsyncSession = Depends(get_db)):
+    """Создать новую категорию"""
+    db_category = Category(**category.dict())
+    db.add(db_category)
+    await db.commit()
+    await db.refresh(db_category)
+    return db_category
+
+@app.get("/categories/", response_model=List[CategoryResponse])
+async def read_all_categories(
+    skip: int = 0, 
+    limit: int = 100,
+    is_active: Optional[bool] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить список всех категорий с пагинацией и фильтрацией"""
+    query = select(Category)
+    
+    if is_active is not None:
+        query = query.filter(Category.is_active == is_active)
+    
+    query = query.offset(skip).limit(limit)
+    result = await db.execute(query)
+    categories = result.scalars().all()
+    
+    return categories
+
+@app.get("/categories/{category_id}", response_model=CategoryResponse)
+async def read_category(category_id: int, db: AsyncSession = Depends(get_db)):
+    """Получить категорию по ID"""
+    result = await db.execute(select(Category).filter(Category.id == category_id))
+    category = result.scalars().first()
+    
+    if category is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    
+    return category
+
+@app.put("/categories/{category_id}", response_model=CategoryResponse)
+async def update_category(
+    category_id: int, 
+    category_data: CategoryUpdate, 
+    db: AsyncSession = Depends(get_db)
+):
+    """Обновить категорию по ID"""
+    result = await db.execute(select(Category).filter(Category.id == category_id))
+    category = result.scalars().first()
+    
+    if category is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    
+    update_data = {k: v for k, v in category_data.dict().items() if v is not None}
+    
+    if update_data:
+        await db.execute(
+            update(Category)
+            .where(Category.id == category_id)
+            .values(**update_data)
+        )
+        await db.commit()
+    
+    result = await db.execute(select(Category).filter(Category.id == category_id))
+    updated_category = result.scalars().first()
+    
+    return updated_category
+
+@app.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
+    """Удалить категорию по ID"""
+    result = await db.execute(select(Category).filter(Category.id == category_id))
+    category = result.scalars().first()
+    
+    if category is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    
+    # Обновляем все товары, связанные с этой категорией
+    await db.execute(
+        update(Goods)
+        .where(Goods.category_id == category_id)
+        .values(category_id=None)
+    )
+    
+    # Удаляем категорию
+    await db.execute(delete(Category).where(Category.id == category_id))
     await db.commit()
     
     return None

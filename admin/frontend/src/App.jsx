@@ -12,11 +12,19 @@ import AdminLogin from './pages/AdminLogin';
 import ProtectedRoute from './components/ProtectedRoute';
 import AllReservations from './pages/AllReservations';
 import AllAvailability from './pages/AllAvailability';
+import Categories from './pages/Categories';
+import CreateCategory from './pages/CreateCategory';
+import EditCategory from './pages/EditCategory';
 
 console.log('=== Рендеринг App компонента ===');
 
 function App() {
   const { isDarkMode, webApp } = useTelegram();
+  
+  // Add effect to log theme on App initialization
+  useEffect(() => {
+    console.log('App: Current theme isDarkMode:', isDarkMode);
+  }, [isDarkMode]);
   
   console.log('App: Проверка window.Telegram:', window.Telegram);
   console.log('App: Проверка WebApp:', window.Telegram?.WebApp);
@@ -67,6 +75,11 @@ function App() {
           {/* Новые маршруты для бронирований и доступности */}
           <Route path="/admin/reservations" element={<ProtectedRoute><AllReservations /></ProtectedRoute>} />
           <Route path="/admin/availability" element={<ProtectedRoute><AllAvailability /></ProtectedRoute>} />
+          
+          {/* Новые маршруты для категорий */}
+          <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
+          <Route path="/admin/categories/create" element={<ProtectedRoute><CreateCategory /></ProtectedRoute>} />
+          <Route path="/admin/categories/edit/:id" element={<ProtectedRoute><EditCategory /></ProtectedRoute>} />
         </Routes>
       </Router>
     </div>

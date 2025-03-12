@@ -36,8 +36,14 @@ const GoodsItem = ({ goods, onDelete, isHighlighted, rowId }) => {
       className={`${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'} 
         ${isHighlighted ? (isDarkMode ? 'bg-blue-900' : 'bg-blue-100') : ''}`}
     >
-      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-        {goods.id}
+      <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+        <div className="flex items-center">
+          <div className="ml-1">
+            <div className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+              {goods.id}
+            </div>
+          </div>
+        </div>
       </td>
       <td className="px-6 py-4 whitespace-nowrap">
         <div className="flex items-center justify-center h-16 w-16 overflow-hidden rounded">
@@ -54,6 +60,19 @@ const GoodsItem = ({ goods, onDelete, isHighlighted, rowId }) => {
       </td>
       <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
         {goods.name}
+      </td>
+      <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+        {goods.category ? (
+          <span className={`px-2 py-1 text-xs rounded ${
+            isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
+          }`}>
+            {goods.category.name}
+          </span>
+        ) : (
+          <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+            Без категории
+          </span>
+        )}
       </td>
       <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
         {goods.article}

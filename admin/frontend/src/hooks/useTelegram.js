@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 
 // Создаем объект для хранения состояния Telegram WebApp
 const telegramState = {
-  isDarkMode: false,
+  isDarkMode: false, // Default value
   initData: '',
   tg: null,
-  initialized: false
+  initialized: false,
+  themeDetected: false // New flag to track if theme was detected
 }
 
 // Инициализируем Telegram WebApp только один раз
@@ -15,112 +16,87 @@ const initTelegramApp = () => {
   console.log('Инициализация Telegram WebApp...')
   
   // Проверяем наличие объекта Telegram в window
-  console.log('Проверка window.Telegram:', !!window.Telegram)
-  
-  // Получаем WebApp
-  const tg = window.Telegram?.WebApp
-  console.log('Проверка window.Telegram.WebApp:', !!tg)
-  
-  // Сохраняем WebApp в состоянии
-  telegramState.tg = tg
-  
-  // Логируем свойства WebApp если он существует
-  if (tg) {
-    console.log('Свойства WebApp:', {
-      initDataExists: !!tg.initData,
-      colorScheme: tg.colorScheme,
-      initDataValue: tg.initData
+  if (window.Telegram && window.Telegram.WebApp) {
+    telegramState.tg = window.Telegram.WebApp
+    
+    // Сохраняем данные инициализации
+    telegramState.initData = window.Telegram.WebApp.initData
+    
+    // Устанавливаем тему только один раз при инициализации
+    if (!telegramState.themeDetected) {
+      // Определяем тему из Telegram WebApp
+      const colorScheme = window.Telegram.WebApp.colorScheme
+      telegramState.isDarkMode = colorScheme === 'dark'
+      telegramState.themeDetected = true
+      
+      console.log(`Установлена тема: ${colorScheme} (isDarkMode: ${telegramState.isDarkMode})`)
+    }
+    
+    // Удаляем старый обработчик темы, чтобы избежать многократного подключения
+    window.Telegram.WebApp.onEvent('themeChanged', () => {
+      // Игнорируем динамические изменения темы для обеспечения консистентности интерфейса
+      console.log('Событие themeChanged игнорируется для поддержания стабильной темы')
     })
     
-    // Устанавливаем начальную тему
-    telegramState.isDarkMode = tg.colorScheme === 'dark'
-    
-    // Сохраняем initData
-    telegramState.initData = tg.initData
-    
-    // Расширяем WebApp для лучшей видимости
-    try {
-      tg.expand()
-      console.log('WebApp успешно расширен')
-    } catch (error) {
-      console.error('Ошибка при расширении WebApp:', error)
-    }
-    
-    // Уведомляем Telegram, что WebApp готов
-    try {
-      tg.ready()
-      console.log('WebApp отметил готовность')
-    } catch (error) {
-      console.error('Ошибка при отметке готовности WebApp:', error)
-    }
-    
-    // Обработчик изменения темы
-    const themeChangeHandler = () => {
-      console.log('Изменение темы:', tg.colorScheme)
-      telegramState.isDarkMode = tg.colorScheme === 'dark'
-      // Вызываем все колбэки подписки на изменение темы
-      themeSubscribers.forEach(callback => callback(telegramState.isDarkMode))
-    }
-    
-    // Подписка на событие изменения темы
-    try {
-      tg.onEvent('themeChanged', themeChangeHandler)
-      console.log('Подписка на изменение темы успешно настроена')
-    } catch (error) {
-      console.error('Ошибка при подписке на изменение темы:', error)
-    }
+    console.log('Telegram WebApp успешно инициализирован')
   } else {
-    console.log('Telegram WebApp не обнаружен, приложение запущено вне Telegram')
-    console.log('window.Telegram:', window.Telegram)
-    console.log('Убедитесь, что:')
+    console.log('Telegram WebApp не обнаружен в окружении')
+    
+    // Для тестирования вне Telegram определяем тему по предпочтениям системы
+    if (!telegramState.themeDetected) {
+      const prefersDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      telegramState.isDarkMode = prefersDarkMode
+      telegramState.themeDetected = true
+      
+      console.log(`Установлена системная тема (isDarkMode: ${telegramState.isDarkMode})`)
+    }
+    
     console.log('1. Скрипт telegram-web-app.js подключен в index.html')
     console.log('2. Приложение открыто через Telegram WebApp')
   }
   
+  // Уведомляем всех подписчиков о начальной теме
+  themeSubscribers.forEach(callback => callback(telegramState.isDarkMode))
+  
   telegramState.initialized = true
 }
 
-// Массив подписчиков на изменение темы
+// Массив подписчиков на изменение темы 
 const themeSubscribers = []
 
 export const useTelegram = () => {
-  const [isDarkMode, setIsDarkMode] = useState(telegramState.isDarkMode)
+  // Access the Telegram WebApp
+  const webApp = window.Telegram?.WebApp;
   
-  // Инициализация только при первом вызове хука
+  // Store user data
+  const [user, setUser] = useState(null);
+  // Always use light mode - removing dark mode switching
+  const isDarkMode = false; // Force light mode
+  const [initData, setInitData] = useState('');
+  
+  // Initialize WebApp data on component mount
   useEffect(() => {
-    if (!telegramState.initialized) {
-      initTelegramApp()
-    }
-    
-    // Подписка на изменение темы
-    const themeCallback = (darkMode) => {
-      setIsDarkMode(darkMode)
-    }
-    
-    themeSubscribers.push(themeCallback)
-    
-    // Отписка при размонтировании
-    return () => {
-      const index = themeSubscribers.indexOf(themeCallback)
-      if (index > -1) {
-        themeSubscribers.splice(index, 1)
+    if (webApp) {
+      // Set initial user data
+      const currentUser = webApp.initDataUnsafe?.user;
+      if (currentUser) {
+        setUser(currentUser);
       }
+      
+      // Get init data for API authorization
+      if (webApp.initData) {
+        setInitData(webApp.initData);
+      }
+      
+      // Enable closing confirmation if needed
+      webApp.enableClosingConfirmation();
     }
-  }, [])
-  
-  const toggleTheme = () => {
-    console.log('Ручное переключение темы')
-    const newDarkMode = !isDarkMode
-    setIsDarkMode(newDarkMode)
-    telegramState.isDarkMode = newDarkMode
-  }
+  }, [webApp]);
   
   return {
-    isDarkMode,
-    toggleTheme,
-    initData: telegramState.initData,
-    isTelegram: !!telegramState.tg,
-    webApp: telegramState.tg,
-    user: telegramState.tg?.initDataUnsafe?.user
-  }
+    webApp,
+    user,
+    isDarkMode, // Will always be false
+    initData
+  };
 }

@@ -79,6 +79,12 @@ const Layout = ({ children }) => {
                   Товары
                 </Link>
                 <Link
+                  to="/admin/categories"
+                  className={navLinkClass('/admin/categories')}
+                >
+                  Категории
+                </Link>
+                <Link
                   to="/admin/reservations"
                   className={navLinkClass('/admin/reservations')}
                 >

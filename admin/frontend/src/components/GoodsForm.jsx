@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useApi } from '../hooks/useApi';
 import { useTelegram } from '../hooks/useTelegram';
+import { useApi } from '../hooks/useApi';
 import { toast } from 'react-hot-toast';
 
 const GoodsForm = ({ editMode = false }) => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getGoodsById, createGoods, updateGoods } = useApi();
   const { isDarkMode, webApp } = useTelegram();
+  const { getGoodsById, createGoods, updateGoods, getCategories } = useApi();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [categories, setCategories] = useState([]);
 
   // Состояние формы
   const [form, setForm] = useState({
@@ -24,18 +25,32 @@ const GoodsForm = ({ editMode = false }) => {
     start_date: '',
     end_date: '',
     min_daily: 1,
-    max_daily: 10
+    max_daily: 10,
+    category_id: ''
   });
 
   // Состояние ошибок валидации
   const [errors, setErrors] = useState({});
 
-  // Загрузка данных для редактирования
+  // Загрузка данных для редактирования и списка категорий
   useEffect(() => {
+    loadCategories();
     if (editMode && id) {
       loadGoodsData();
     }
   }, [id, editMode]);
+
+  // Загрузка списка категорий
+  const loadCategories = async () => {
+    try {
+      const data = await getCategories();
+      if (data) {
+        setCategories(data);
+      }
+    } catch (err) {
+      toast.error(`Ошибка при загрузке категорий: ${err.message}`);
+    }
+  };
 
   // Получение данных товара для редактирования
   const loadGoodsData = async () => {
@@ -47,7 +62,8 @@ const GoodsForm = ({ editMode = false }) => {
         const formattedData = {
           ...data,
           start_date: data.start_date ? formatDateForInput(data.start_date) : '',
-          end_date: data.end_date ? formatDateForInput(data.end_date) : ''
+          end_date: data.end_date ? formatDateForInput(data.end_date) : '',
+          category_id: data.category_id || ''
         };
         setForm(formattedData);
       }
@@ -178,7 +194,9 @@ const GoodsForm = ({ editMode = false }) => {
         price: Number(form.price),
         cashback_percent: Number(form.cashback_percent),
         min_daily: Number(form.min_daily),
-        max_daily: Number(form.max_daily)
+        max_daily: Number(form.max_daily),
+        // Преобразуем category_id в число или null
+        category_id: form.category_id ? Number(form.category_id) : null
       };
       
       console.log('Submitting form data:', goodsData);
@@ -258,6 +276,27 @@ const GoodsForm = ({ editMode = false }) => {
           {errors.name && <p className={errorClass}>{errors.name}</p>}
         </div>
         
+        {/* Категория */}
+        <div>
+          <label htmlFor="category_id" className={labelClass}>
+            Категория
+          </label>
+          <select
+            id="category_id"
+            name="category_id"
+            value={form.category_id}
+            onChange={handleChange}
+            className={inputClass}
+          >
+            <option value="">Без категории</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        
         {/* Артикул */}
         <div>
           <label htmlFor="article" className={labelClass}>
@@ -293,9 +332,6 @@ const GoodsForm = ({ editMode = false }) => {
           />
           {errors.url && <p className={errorClass}>{errors.url}</p>}
         </div>
-        
-        
-        
         
         {/* Цена */}
         <div>

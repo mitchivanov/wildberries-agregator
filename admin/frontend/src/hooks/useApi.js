@@ -5,7 +5,7 @@ import { useTelegram } from './useTelegram';
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api',
+  baseURL: 'https://3f0b-89-169-52-137.ngrok-free.app/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -115,14 +115,21 @@ export const useApi = () => {
   // Обновление товара
   const updateGoods = useCallback(async (id, goodsData) => {
     console.log(`Обновление товара ${id}:`, goodsData);
-    const result = await request('put', `/goods/${id}`, goodsData);
-    
-    // Сбрасываем кэши
-    queryCache.delete('/goods/');
-    queryCache.delete(`/goods/${id}`);
-    
-    toast.success('Товар успешно обновлен');
-    return result;
+    try {
+      // Убедитесь, что category_id правильно сериализуется
+      // Если category_id пустая строка или null, отправляем null
+      if (goodsData.category_id === '' || goodsData.category_id === undefined) {
+        goodsData.category_id = null;
+      }
+      
+      const response = await request('put', `/goods/${id}`, goodsData);
+      return response;
+    } catch (error) {
+      const errorMessage = error.response?.data?.detail || error.message;
+      console.error('Ошибка при обновлении товара:', errorMessage);
+      toast.error(`Ошибка: ${errorMessage}`);
+      throw error;
+    }
   }, [request]);
 
   // Удаление товара
@@ -227,6 +234,57 @@ export const useApi = () => {
     return maskedPart + visiblePart;
   }, []);
 
+  // Добавляем функцию для парсинга товара с Wildberries
+  const parseWildberriesUrl = useCallback(async (url) => {
+    console.log(`Парсинг товара Wildberries: ${url}`);
+    return request('post', '/parse-wildberries/', { url });
+  }, [request]);
+
+  // Добавляем методы для работы с категориями
+  const createCategory = useCallback(async (categoryData) => {
+    console.log('Создание новой категории:', categoryData);
+    return request('post', '/categories/', categoryData);
+  }, [request]);
+
+  const getCategories = useCallback(async () => {
+    console.log('Запрос списка категорий');
+    return request('get', '/categories/');
+  }, [request]);
+
+  // Добавим метод для обновления категории
+  const updateCategory = useCallback(async (id, categoryData) => {
+    console.log(`Обновление категории ${id}:`, categoryData);
+    const result = await request('put', `/categories/${id}`, categoryData);
+    
+    // Сбрасываем кэши
+    queryCache.delete('/categories/');
+    queryCache.delete(`/categories/${id}`);
+    
+    if (!result.error) {
+      toast.success('Категория успешно обновлена');
+    }
+    return result;
+  }, [request]);
+
+  // Обновляем getCategoryById и deleteCategory, чтобы они использовали request
+  const getCategoryById = useCallback(async (id) => {
+    console.log(`Запрос категории по ID: ${id}`);
+    return request('get', `/categories/${id}`);
+  }, [request]);
+
+  const deleteCategory = useCallback(async (id) => {
+    console.log(`Удаление категории ${id}`);
+    const result = await request('delete', `/categories/${id}`);
+    
+    // Сбрасываем кэш списка категорий
+    queryCache.delete('/categories/');
+    
+    if (!result.error) {
+      toast.success('Категория успешно удалена');
+    }
+    return result;
+  }, [request]);
+
   return {
     loading,
     error,
@@ -240,5 +298,11 @@ export const useApi = () => {
     getAllReservations,
     getAllAvailability,
     maskArticle,
+    parseWildberriesUrl,
+    getCategories,
+    getCategoryById,
+    deleteCategory,
+    createCategory,
+    updateCategory
   };
 }; 
