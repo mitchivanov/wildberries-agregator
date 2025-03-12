@@ -49,7 +49,7 @@ app = FastAPI()
 # Настройка CORS для API бота
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[f"{TELEGRAM_WEBAPP_URL}"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
