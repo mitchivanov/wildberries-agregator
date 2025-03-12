@@ -5,7 +5,7 @@ import { useTelegram } from './useTelegram';
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'https://develooper.ru/api',
+  baseURL: 'http://localhost:8000/api',
   headers: {
     'Content-Type': 'application/json',
   },

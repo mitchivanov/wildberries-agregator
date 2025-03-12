@@ -9,18 +9,20 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U socialist -d wb_aggregator"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
     networks:
       - backend-network
 
   backend:
     build: ./admin/backend
+    env_file: 
+      - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://socialist:revolution2023@postgres:5432/wb_aggregator
-      BOT_TOKEN: 7090333910:AAGaoebRTghPoeJValIhSe1aSAdqHuK_tlU
-      TELEGRAM_WEBAPP_URL: https://develooper.ru
+      - DATABASE_URL
+      - TELEGRAM_WEBAPP_URL
+      - BOT_API_URL
+      - TELEGRAM_BOT_TOKEN
+      - SUPER_ADMIN_IDS
+      - DEVELOPMENT_MODE
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,12 +42,26 @@ services:
       - backend
     networks:
       - frontend-network
+    environment:
+      - API_URL
+      - VITE_ADMIN_LOGIN=${VITE_ADMIN_LOGIN}
+      - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
+    env_file: 
+      - .env
 
   bot:
     build: ./admin/bot
+    env_file: 
+      - .env
     environment:
-      BOT_TOKEN: 7090333910:AAGaoebRTghPoeJValIhSe1aSAdqHuK_tlU
-      WEBAPP_URL: https://develooper.ru
+      - TELEGRAM_BOT_TOKEN
+      - TELEGRAM_WEBAPP_URL
+      - DATABASE_URL
+      - API_URL
+      - SUPER_ADMIN_IDS
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - backend-network
 

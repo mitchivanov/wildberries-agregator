@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Dashboard from './pages/Dashboard';
 import GoodsPage from './pages/GoodsPage';
@@ -29,7 +29,18 @@ function App() {
     } else {
       htmlElement.classList.remove('dark');
     }
-  }, [isDarkMode]);
+    
+    // Проверяем параметр path в URL для перенаправления с WebApp
+    if (webApp) {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pathParam = urlParams.get('path');
+      
+      if (pathParam === 'admin') {
+        // Перенаправляем на страницу админки
+        window.location.href = '/admin';
+      }
+    }
+  }, [isDarkMode, webApp]);
 
   return (
     <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900'}`}>

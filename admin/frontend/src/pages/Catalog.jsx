@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useTelegram } from '../hooks/useTelegram';
@@ -28,29 +28,34 @@ const Catalog = () => {
     try {
       const data = await getGoods();
       if (data) {
-        // Фильтруем только активные товары
-        const activeGoods = data.filter(item => item.is_active);
+        // Проверяем, что data это массив перед использованием filter
+        const activeGoods = Array.isArray(data) 
+          ? data.filter(item => item.is_active) 
+          : [];
         setGoods(activeGoods);
         
-        // Получаем данные о доступности для всех товаров на сегодня
+        // Получаем данные о доступности для всех активных товаров на сегодня
         const today = new Date().toISOString().split('T')[0];
         const availabilityMap = {};
         
-        activeGoods.forEach(item => {
-          if (item.daily_availability && item.daily_availability.length > 0) {
-            const todayAvailability = item.daily_availability.find(av => 
-              av.date.split('T')[0] === today
-            );
-            availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
-          } else {
-            availabilityMap[item.id] = 0;
+        // Убедимся, что activeGoods - массив
+        if (Array.isArray(activeGoods) && activeGoods.length > 0) {
+          activeGoods.forEach(item => {
+            if (item.daily_availability && item.daily_availability.length > 0) {
+              const todayAvailability = item.daily_availability.find(av => 
+                av.date.split('T')[0] === today
+              );
+              availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
+            } else {
+              availabilityMap[item.id] = 0;
+            }
+          });
+          
+          setAvailabilityData(availabilityMap);
+          
+          if (data.length > 0 && activeGoods.length === 0) {
+            toast.info('В настоящее время нет доступных товаров');
           }
-        });
-        
-        setAvailabilityData(availabilityMap);
-        
-        if (data.length > 0 && activeGoods.length === 0) {
-          toast.info('В настоящее время нет доступных товаров');
         }
       }
     } catch (err) {
@@ -70,26 +75,31 @@ const Catalog = () => {
     setIsSearching(true);
     try {
       const data = await searchGoods(query);
-      // Фильтруем только активные товары
-      const activeGoods = data.filter(item => item.is_active);
+      // Проверяем, что data это массив перед использованием filter
+      const activeGoods = Array.isArray(data) 
+        ? data.filter(item => item.is_active) 
+        : [];
       setGoods(activeGoods);
       
       // Получаем данные о доступности для всех найденных товаров на сегодня
       const today = new Date().toISOString().split('T')[0];
       const availabilityMap = {};
       
-      activeGoods.forEach(item => {
-        if (item.daily_availability && item.daily_availability.length > 0) {
-          const todayAvailability = item.daily_availability.find(av => 
-            av.date.split('T')[0] === today
-          );
-          availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
-        } else {
-          availabilityMap[item.id] = 0;
-        }
-      });
-      
-      setAvailabilityData(availabilityMap);
+      // Убедимся, что activeGoods - массив
+      if (Array.isArray(activeGoods) && activeGoods.length > 0) {
+        activeGoods.forEach(item => {
+          if (item.daily_availability && item.daily_availability.length > 0) {
+            const todayAvailability = item.daily_availability.find(av => 
+              av.date.split('T')[0] === today
+            );
+            availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
+          } else {
+            availabilityMap[item.id] = 0;
+          }
+        });
+        
+        setAvailabilityData(availabilityMap);
+      }
     } catch (error) {
       console.error('Ошибка при поиске товаров:', error);
       toast.error('Не удалось выполнить поиск');
@@ -104,6 +114,27 @@ const Catalog = () => {
     const discountAmount = (price * cashbackPercent) / 100;
     return Math.round(price - discountAmount);
   };
+
+  // Сортируем товары - доступные сверху, недоступные снизу
+  const sortedGoods = useMemo(() => {
+    if (!goods || !goods.length) return [];
+    
+    return [...goods].sort((a, b) => {
+      const aAvailable = availabilityData[a.id] > 0 ? 1 : 0;
+      const bAvailable = availabilityData[b.id] > 0 ? 1 : 0;
+      
+      // Сначала сортируем по наличию товара (в наличии - выше)
+      if (aAvailable !== bAvailable) {
+        return bAvailable - aAvailable;
+      }
+      
+      // Если наличие одинаковое, то сортируем по количеству (больше - выше)
+      const aQuantity = availabilityData[a.id] || 0;
+      const bQuantity = availabilityData[b.id] || 0;
+      
+      return bQuantity - aQuantity;
+    });
+  }, [goods, availabilityData]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -141,13 +172,13 @@ const Catalog = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {goods.map((item) => (
+          {sortedGoods.map((item) => (
             <Link
               key={item.id}
               to={`/goods/${item.id}`}
               className={`block overflow-hidden rounded-lg shadow transition transform hover:-translate-y-1 ${
                 isDarkMode ? 'bg-gray-800 hover:shadow-blue-500/20' : 'bg-white hover:shadow-lg'
-              }`}
+              } ${availabilityData[item.id] ? '' : 'opacity-70'}`}
             >
               <div className="h-48 overflow-hidden">
                 <img
@@ -190,7 +221,9 @@ const Catalog = () => {
                       </span>
                     )}
                     <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
-                      isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800'
+                      availabilityData[item.id] 
+                        ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800')
+                        : (isDarkMode ? 'bg-red-900 text-white' : 'bg-red-100 text-red-800')
                     }`}>
                       {availabilityData[item.id] ? `Доступно: ${availabilityData[item.id]} шт.` : 'Нет в наличии'}
                     </span>

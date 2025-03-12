@@ -20,6 +20,7 @@ import logging
 from worker import update_goods_activity
 import time
 from aiohttp import ClientSession
+from sqlalchemy.orm import selectinload
 
 from database import get_db, init_db, close_db, AsyncScopedSession
 from models import Goods, Reservation, DailyAvailability
@@ -33,12 +34,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Получаем токен из окружения
-BOT_TOKEN = "7205892472:AAGAShZUu-DiXSIYhW7_GSCwZIq-pVT3cNc"
 # Добавляем режим разработки
-DEVELOPMENT_MODE = os.environ.get("DEVELOPMENT_MODE", "True").lower() == "true"
+DEVELOPMENT_MODE = os.getenv("DEVELOPMENT_MODE").lower() == "true"
 
 # Добавляем URL для бота
-BOT_API_URL = os.getenv("BOT_API_URL", "http://bot:8080")
+BOT_API_URL = os.getenv("BOT_API_URL")
 
 # Добавляем переменную для отслеживания времени последнего запроса
 _last_availability_request_time = 0
@@ -805,6 +805,55 @@ async def read_all_reservations(
         response_list.append(reservation_dict)
     
     return response_list
+
+@app.delete("/reservations/{reservation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_reservation(
+    reservation_id: int, 
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(verify_telegram_user)
+):
+    """Отмена бронирования и возврат товара"""
+    logger.info(f"Запрос на отмену бронирования {reservation_id} от пользователя {user_id}")
+    
+    # Получаем бронирование
+    result = await db.execute(
+        select(Reservation)
+        .where(Reservation.id == reservation_id)
+        .options(selectinload(Reservation.goods))
+    )
+    reservation = result.scalars().first()
+    
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Бронирование не найдено")
+    
+    # Проверяем права пользователя
+    if reservation.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав для отмены бронирования")
+    
+    # Находим соответствующую запись о доступности
+    availability_result = await db.execute(
+        select(DailyAvailability)
+        .where(
+            DailyAvailability.goods_id == reservation.goods_id,
+            DailyAvailability.date == reservation.reserved_at.date()
+        )
+    )
+    daily_availability = availability_result.scalars().first()
+    
+    if daily_availability:
+        # Возвращаем товар в доступное количество
+        daily_availability.available_quantity += reservation.quantity
+        await db.commit()
+        logger.info(f"Возвращено {reservation.quantity} шт. товара {reservation.goods_id}")
+    
+    # Удаляем бронирование
+    await db.execute(
+        delete(Reservation)
+        .where(Reservation.id == reservation_id)
+    )
+    await db.commit()
+    
+    return None
 
 # Для тестирования приложения
 if __name__ == "__main__":

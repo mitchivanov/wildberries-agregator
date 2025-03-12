@@ -13,6 +13,7 @@ const GoodsDetail = () => {
   const [goods, setGoods] = useState(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [availableToday, setAvailableToday] = useState(0);
+  const [showInstructions, setShowInstructions] = useState(false);
   
   useEffect(() => {
     loadGoodsDetails();
@@ -77,8 +78,8 @@ const GoodsDetail = () => {
       }
       
       setShowConfirmation(false);
+      setShowInstructions(true);
       toast.success('Товар успешно забронирован! Проверьте сообщение в Telegram');
-      navigate('/');
     } catch (error) {
       console.error('Ошибка при бронировании:', error);
       toast.error('Не удалось забронировать товар');
@@ -168,7 +169,7 @@ const GoodsDetail = () => {
               Забронировать
             </button>
             
-            {goods.purchase_guide && (
+            {showInstructions && goods.purchase_guide && (
               <div className="mt-6">
                 <h3 className={`text-lg font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-800'}`}>
                   Инструкция по покупке:
@@ -178,6 +179,9 @@ const GoodsDetail = () => {
                     {goods.purchase_guide}
                   </p>
                 </div>
+                <p className={`mt-2 text-xs italic ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Инструкция также будет продублирована Вам в личные сообщения
+                </p>
               </div>
             )}
           </div>
