@@ -57,7 +57,7 @@ app = FastAPI(title="Goods Admin API", lifespan=lifespan)
 # Добавляем CORS для обработки запросов с нового домена
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[f"{TELEGRAM_WEBAPP_URL}"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
