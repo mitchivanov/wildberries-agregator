@@ -24,6 +24,18 @@ import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+
+# Путь к CSV файлу с пользователями
+USERS_CSV_PATH = os.path.join(os.path.dirname(__file__), 'users.csv')
+# Путь к файлу для сохранения рассылок
+BROADCASTS_PATH = os.path.join(os.path.dirname(__file__), 'broadcasts.json')
+
+SUPER_ADMIN_IDS = os.getenv("SUPER_ADMIN_IDS", "").split(',')
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "")
+TELEGRAM_WEBAPP_URL = os.getenv("TELEGRAM_WEBAPP_URL", "") + "?startapp=1"  # Добавляем параметр для инициализации
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -37,21 +49,11 @@ app = FastAPI()
 # Настройка CORS для API бота
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[f"{TELEGRAM_WEBAPP_URL}"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Путь к CSV файлу с пользователями
-USERS_CSV_PATH = os.path.join(os.path.dirname(__file__), 'users.csv')
-# Путь к файлу для сохранения рассылок
-BROADCASTS_PATH = os.path.join(os.path.dirname(__file__), 'broadcasts.json')
-
-SUPER_ADMIN_IDS = os.getenv("SUPER_ADMIN_IDS", "").split(',')
-BACKEND_API_URL = os.getenv("BACKEND_API_URL", "")
-TELEGRAM_WEBAPP_URL = os.getenv("TELEGRAM_WEBAPP_URL", "") + "?startapp=1"  # Добавляем параметр для инициализации
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # Создаем хранилище для состояний FSM
 storage = MemoryStorage()

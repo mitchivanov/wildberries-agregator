@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Получаем токен из окружения
 # Добавляем режим разработки
 DEVELOPMENT_MODE = os.getenv("DEVELOPMENT_MODE").lower() == "true"
-
+TELEGRAM_WEBAPP_URL = os.getenv("TELEGRAM_WEBAPP_URL")
 # Добавляем URL для бота
 BOT_API_URL = os.getenv("BOT_API_URL")
 
@@ -57,7 +57,7 @@ app = FastAPI(title="Goods Admin API", lifespan=lifespan)
 # Добавляем CORS для обработки запросов с нового домена
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[f"{TELEGRAM_WEBAPP_URL}"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
