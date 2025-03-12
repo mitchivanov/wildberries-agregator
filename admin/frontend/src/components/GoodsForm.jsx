@@ -8,9 +8,10 @@ const GoodsForm = ({ editMode = false }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDarkMode, webApp } = useTelegram();
-  const { getGoodsById, createGoods, updateGoods, getCategories } = useApi();
+  const { getGoodsById, createGoods, updateGoods, getCategories, parseWildberriesUrl } = useApi();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
   const [categories, setCategories] = useState([]);
 
   // Состояние формы
@@ -63,7 +64,7 @@ const GoodsForm = ({ editMode = false }) => {
           ...data,
           start_date: data.start_date ? formatDateForInput(data.start_date) : '',
           end_date: data.end_date ? formatDateForInput(data.end_date) : '',
-          category_id: data.category_id || ''
+          category_id: data.category?.id || ''
         };
         setForm(formattedData);
       }
@@ -107,6 +108,38 @@ const GoodsForm = ({ editMode = false }) => {
         ...prev,
         [name]: null
       }));
+    }
+  };
+
+  // Функция для парсинга товара с Wildberries
+  const handleParseWildberries = async () => {
+    if (!form.url) {
+      toast.error('Введите URL товара Wildberries для парсинга');
+      return;
+    }
+
+    setIsParsing(true);
+    try {
+      const parsedData = await parseWildberriesUrl(form.url);
+      
+      if (parsedData && !parsedData.error) {
+        // Обновляем состояние формы данными из парсера
+        setForm(prev => ({
+          ...prev,
+          name: parsedData.name || prev.name,
+          price: parsedData.price || prev.price,
+          article: parsedData.article || prev.article,
+          image: parsedData.image || prev.image
+        }));
+        
+        toast.success('Данные успешно загружены');
+      } else {
+        toast.error('Не удалось получить данные о товаре');
+      }
+    } catch (err) {
+      toast.error(`Ошибка при парсинге товара: ${err.message}`);
+    } finally {
+      setIsParsing(false);
     }
   };
 
@@ -195,7 +228,6 @@ const GoodsForm = ({ editMode = false }) => {
         cashback_percent: Number(form.cashback_percent),
         min_daily: Number(form.min_daily),
         max_daily: Number(form.max_daily),
-        // Преобразуем category_id в число или null
         category_id: form.category_id ? Number(form.category_id) : null
       };
       
@@ -258,6 +290,36 @@ const GoodsForm = ({ editMode = false }) => {
       </h1>
       
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* URL с кнопкой парсинга */}
+        <div>
+          <label htmlFor="url" className={labelClass}>
+            URL*
+          </label>
+          <div className="flex">
+            <input
+              type="text"
+              id="url"
+              name="url"
+              value={form.url}
+              onChange={handleChange}
+              className={`${inputClass} rounded-r-none`}
+              placeholder="Введите URL товара Wildberries"
+              required
+            />
+            <button
+              type="button"
+              onClick={handleParseWildberries}
+              className={`px-4 py-2 bg-blue-600 text-white rounded-r-md hover:bg-blue-700 flex-shrink-0 ${
+                isParsing ? 'opacity-70 cursor-wait' : ''
+              }`}
+              disabled={isParsing}
+            >
+              {isParsing ? 'Загрузка...' : 'Загрузить'}
+            </button>
+          </div>
+          {errors.url && <p className={errorClass}>{errors.url}</p>}
+        </div>
+        
         {/* Название товара */}
         <div>
           <label htmlFor="name" className={labelClass}>
@@ -274,27 +336,6 @@ const GoodsForm = ({ editMode = false }) => {
             required
           />
           {errors.name && <p className={errorClass}>{errors.name}</p>}
-        </div>
-        
-        {/* Категория */}
-        <div>
-          <label htmlFor="category_id" className={labelClass}>
-            Категория
-          </label>
-          <select
-            id="category_id"
-            name="category_id"
-            value={form.category_id}
-            onChange={handleChange}
-            className={inputClass}
-          >
-            <option value="">Без категории</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
         </div>
         
         {/* Артикул */}
@@ -314,23 +355,26 @@ const GoodsForm = ({ editMode = false }) => {
           />
           {errors.article && <p className={errorClass}>{errors.article}</p>}
         </div>
-
-        {/* URL */}
+        
+        {/* Категория */}
         <div>
-          <label htmlFor="url" className={labelClass}>
-            URL*
+          <label htmlFor="category_id" className={labelClass}>
+            Категория
           </label>
-          <input
-            type="text"
-            id="url"
-            name="url"
-            value={form.url}
+          <select
+            id="category_id"
+            name="category_id"
+            value={form.category_id}
             onChange={handleChange}
             className={inputClass}
-            placeholder="Введите URL товара"
-            required
-          />
-          {errors.url && <p className={errorClass}>{errors.url}</p>}
+          >
+            <option value="">Выберите категорию</option>
+            {categories.map(category => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
         </div>
         
         {/* Цена */}

@@ -56,11 +56,14 @@ class CategoryUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
 
-class CategoryResponse(CategoryBase):
+class CategoryResponse(BaseModel):
     id: int
-    created_at: datetime
-    updated_at: datetime
-
+    name: str
+    description: Optional[str] = None
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    
     class Config:
         from_attributes = True
 

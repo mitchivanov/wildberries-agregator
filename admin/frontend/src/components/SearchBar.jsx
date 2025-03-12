@@ -18,7 +18,8 @@ const SearchBar = ({ onSearch }) => {
           placeholder="Поиск товаров..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className={`form-input rounded-r-none flex-1 ${
+          onKeyDown={(e) => e.key === 'Enter' && handleSubmit(e)}
+          className={`block w-full rounded-l-md border px-3 py-2 focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${
             isDarkMode 
               ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
               : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
