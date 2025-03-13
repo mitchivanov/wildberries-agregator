@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useApi } from '../hooks/useApi';
-import { useTelegram } from '../hooks/useTelegram';
+import { useApi } from '../../hooks/useApi';
+import { useTelegram } from '../../hooks/useTelegram';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import GoodsAvailability from '../components/GoodsAvailability';

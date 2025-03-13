@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { useTelegram } from '../hooks/useTelegram';
+import { useTelegram } from '../../hooks/useTelegram';
 import Layout from '../components/Layout';
-import CategoryList from '../components/CategoryList';
+import CategoryList from '../../components/categories/CategoryList';
 
 const Categories = () => {
   const { webApp } = useTelegram();

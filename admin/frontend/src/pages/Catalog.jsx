@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useTelegram } from '../hooks/useTelegram';
-import SearchBar from '../components/SearchBar';
+import SearchBar from '../components/common/SearchBar';
 import toast from 'react-hot-toast';
 
 const Catalog = () => {
@@ -86,45 +86,45 @@ const Catalog = () => {
   };
 
   const handleSearch = async (query) => {
-    if (!query.trim()) {
-      return loadGoods();
-    }
-    
-    setLoading(true);
     setIsSearching(true);
+    setLoading(true);
     try {
-      const data = await searchGoods(query);
-      // Добавим отладочный вывод результатов поиска
-      console.log('Результаты поиска:', data);
-      
-      // Проверяем, что data это массив перед использованием filter
-      const activeGoods = Array.isArray(data) 
-        ? data.filter(item => item.is_active) 
-        : [];
-      setGoods(activeGoods);
-      
-      // Получаем данные о доступности для всех найденных товаров на сегодня
-      const today = new Date().toISOString().split('T')[0];
-      const availabilityMap = {};
-      
-      // Убедимся, что activeGoods - массив
-      if (Array.isArray(activeGoods) && activeGoods.length > 0) {
-        activeGoods.forEach(item => {
-          if (item.daily_availability && item.daily_availability.length > 0) {
-            const todayAvailability = item.daily_availability.find(av => 
-              av.date.split('T')[0] === today
-            );
-            availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
-          } else {
-            availabilityMap[item.id] = 0;
+      if (!query.trim()) {
+        // Если поисковый запрос пустой, загружаем все товары
+        await loadGoods();
+      } else {
+        // Иначе выполняем поиск
+        const results = await searchGoods(query);
+        if (results) {
+          // Фильтруем только активные товары
+          const activeGoods = Array.isArray(results) 
+            ? results.filter(item => item.is_active) 
+            : [];
+          setGoods(activeGoods);
+          
+          // Обновляем данные о доступности
+          const today = new Date().toISOString().split('T')[0];
+          const availabilityMap = {};
+          
+          if (Array.isArray(activeGoods) && activeGoods.length > 0) {
+            activeGoods.forEach(item => {
+              if (item.daily_availability && item.daily_availability.length > 0) {
+                const todayAvailability = item.daily_availability.find(av => 
+                  av.date.split('T')[0] === today
+                );
+                availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
+              } else {
+                availabilityMap[item.id] = 0;
+              }
+            });
+            
+            setAvailabilityData(availabilityMap);
           }
-        });
-        
-        setAvailabilityData(availabilityMap);
+        }
       }
     } catch (error) {
-      console.error('Ошибка при поиске товаров:', error);
-      toast.error('Не удалось выполнить поиск');
+      console.error('Ошибка при поиске:', error);
+      toast.error('Ошибка при поиске товаров');
     } finally {
       setLoading(false);
     }

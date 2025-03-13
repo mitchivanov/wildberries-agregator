@@ -3,9 +3,11 @@ import axios from 'axios';
 import { toast } from 'react-hot-toast';
 import { useTelegram } from './useTelegram';
 
-// Создаем экземпляр axios с базовым URL
+const API_URL = import.meta.env.VITE_API_URL;
+
+// Создаем экземпляр axios с базовым URL из переменных окружения
 const api = axios.create({
-  baseURL: 'https://develooper.ru/api',
+  baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -35,21 +37,56 @@ api.interceptors.response.use(
   }
 );
 
-// Кэш для запросов
-const queryCache = new Map();
+// Улучшенный механизм кэширования с TTL
+class CacheManager {
+  constructor() {
+    this.cache = new Map();
+    this.ttl = new Map();
+  }
+
+  set(key, value, ttlSeconds = 60) {
+    this.cache.set(key, value);
+    this.ttl.set(key, Date.now() + (ttlSeconds * 1000));
+  }
+
+  get(key) {
+    if (!this.cache.has(key)) return null;
+    
+    // Проверяем TTL
+    if (Date.now() > this.ttl.get(key)) {
+      this.delete(key);
+      return null;
+    }
+    
+    return this.cache.get(key);
+  }
+
+  delete(key) {
+    this.cache.delete(key);
+    this.ttl.delete(key);
+  }
+
+  clear() {
+    this.cache.clear();
+    this.ttl.clear();
+  }
+}
+
+const queryCache = new CacheManager();
 
 export const useApi = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const { initData } = useTelegram();
+  const { webApp } = useTelegram();
   
-  // Если есть initData от Telegram, добавляем его в заголовки
+  // Получаем init_data при инициализации
   useEffect(() => {
-    if (initData) {
-      api.defaults.headers.common['X-Telegram-Init-Data'] = initData;
-      console.log('Установлены данные инициализации в заголовки API');
+    if (webApp) {
+      // Telegram Web App предоставляет initData через webApp.initData
+      api.defaults.headers.common['X-Telegram-Init-Data'] = webApp.initData;
+      console.log('Установлены данные инициализации в заголовки API:', webApp.initData);
     }
-  }, [initData]);
+  }, [webApp]);
 
   // Общая функция для запросов с обработкой ошибок и индикатором загрузки
   const request = useCallback(async (method, url, data = null) => {
@@ -81,14 +118,25 @@ export const useApi = () => {
 
   // Получение всех товаров
   const getGoods = useCallback(async () => {
-    console.log('Запрос списка товаров');
-    return request('get', '/goods/');
+    const cacheKey = '/goods/';
+    const cachedData = queryCache.get(cacheKey);
+    
+    if (cachedData) {
+      console.log('Возвращаем кэшированные данные');
+      return cachedData;
+    }
+
+    const data = await request('get', '/goods/');
+    if (!data.error) {
+      queryCache.set(cacheKey, data, 60); // Кэш на 1 минуту
+    }
+    return data;
   }, [request]);
 
   // Поиск товаров
   const searchGoods = useCallback(async (query) => {
-    console.log(`Поиск товаров по запросу: ${query}`);
-    return request('get', `/goods/?search=${encodeURIComponent(query)}`);
+    console.log('Поиск товаров:', query);
+    return request('get', `/goods/?name=${encodeURIComponent(query)}`);
   }, [request]);
 
   // Получение товара по ID

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useTelegram } from '../hooks/useTelegram';
-import { useApi } from '../hooks/useApi';
+import { useTelegram } from '../../hooks/useTelegram';
+import { useApi } from '../../hooks/useApi';
 
 const CategoryForm = () => {
   const { id } = useParams();

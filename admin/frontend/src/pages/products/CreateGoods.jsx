@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
-import { useTelegram } from '../hooks/useTelegram';
+import { useTelegram } from '../../hooks/useTelegram';
 import Layout from '../components/Layout';
-import CategoryForm from '../components/CategoryForm';
+import GoodsForm from '../../components/products/GoodsForm';
 
-const EditCategory = () => {
+const CreateGoods = () => {
   const { webApp } = useTelegram();
 
   useEffect(() => {
@@ -11,7 +11,7 @@ const EditCategory = () => {
       webApp.BackButton.show();
       
       const handleBackButton = () => {
-        window.location.href = '/admin/categories';
+        window.location.href = '/goods';
       };
       
       webApp.BackButton.onClick(handleBackButton);
@@ -24,9 +24,9 @@ const EditCategory = () => {
 
   return (
     <Layout>
-      <CategoryForm />
+      <GoodsForm />
     </Layout>
   );
 };
 
-export default EditCategory; 
+export default CreateGoods; 

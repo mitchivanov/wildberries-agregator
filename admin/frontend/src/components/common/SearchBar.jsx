@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTelegram } from '../hooks/useTelegram';
+import { useTelegram } from '../../hooks/useTelegram';
 
 const SearchBar = ({ onSearch }) => {
   const [query, setQuery] = useState('');

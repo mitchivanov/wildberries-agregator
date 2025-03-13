@@ -64,10 +64,9 @@ const initTelegramApp = () => {
 // Массив подписчиков на изменение темы 
 const themeSubscribers = []
 
-export const useTelegram = () => {
-  // Access the Telegram WebApp
-  const webApp = window.Telegram?.WebApp;
-  
+const tg = window.Telegram?.WebApp;
+
+export function useTelegram() {
   // Store user data
   const [user, setUser] = useState(null);
   // Always use light mode - removing dark mode switching
@@ -76,25 +75,25 @@ export const useTelegram = () => {
   
   // Initialize WebApp data on component mount
   useEffect(() => {
-    if (webApp) {
+    if (tg) {
       // Set initial user data
-      const currentUser = webApp.initDataUnsafe?.user;
+      const currentUser = tg.initDataUnsafe?.user;
       if (currentUser) {
         setUser(currentUser);
       }
       
       // Get init data for API authorization
-      if (webApp.initData) {
-        setInitData(webApp.initData);
+      if (tg.initData) {
+        setInitData(tg.initData);
       }
       
       // Enable closing confirmation if needed
-      webApp.enableClosingConfirmation();
+      tg.enableClosingConfirmation();
     }
-  }, [webApp]);
+  }, [tg]);
   
   return {
-    webApp,
+    webApp: tg,
     user,
     isDarkMode, // Will always be false
     initData

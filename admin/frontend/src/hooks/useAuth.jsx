@@ -1,13 +1,15 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 
-// Получаем переменные с правильным префиксом VITE_ для Vite.js
-const ADMIN_LOGIN = 'admin'
-const ADMIN_PASSWORD = 'password123'
+// Получаем переменные окружения через import.meta.env
+const ADMIN_LOGIN = import.meta.env.VITE_ADMIN_LOGIN
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD
 
-// Добавим отладочный вывод
-console.log('Переменные аутентификации загружены:');
-console.log('ADMIN_LOGIN доступен:', !!ADMIN_LOGIN, ADMIN_LOGIN);  // Добавим сам логин для отладки
-console.log('ADMIN_PASSWORD доступен:', !!ADMIN_PASSWORD, ADMIN_PASSWORD); // Добавим сам пароль для отладки
+// Добавим отладочный вывод только для разработки
+if (import.meta.env.DEV) {
+  console.log('Переменные аутентификации загружены:');
+  console.log('ADMIN_LOGIN доступен:', !!ADMIN_LOGIN);
+  console.log('ADMIN_PASSWORD доступен:', !!ADMIN_PASSWORD);
+}
 
 const AuthContext = createContext();
 

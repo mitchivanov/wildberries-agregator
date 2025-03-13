@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
-import { useTelegram } from '../hooks/useTelegram';
+import { useTelegram } from '../../hooks/useTelegram';
 import Layout from '../components/Layout';
-import GoodsForm from '../components/GoodsForm';
+import GoodsList from '../../components/products/GoodsList';
 
-const CreateGoods = () => {
+const GoodsPage = () => {
   const { webApp } = useTelegram();
 
   useEffect(() => {
@@ -11,7 +11,7 @@ const CreateGoods = () => {
       webApp.BackButton.show();
       
       const handleBackButton = () => {
-        window.location.href = '/goods';
+        window.location.href = '/';
       };
       
       webApp.BackButton.onClick(handleBackButton);
@@ -24,9 +24,9 @@ const CreateGoods = () => {
 
   return (
     <Layout>
-      <GoodsForm />
+      <GoodsList />
     </Layout>
   );
 };
 
-export default CreateGoods; 
+export default GoodsPage; 

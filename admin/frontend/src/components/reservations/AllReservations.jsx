@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { useApi } from '../hooks/useApi';
-import { useTelegram } from '../hooks/useTelegram';
+import { useApi } from '../../hooks/useApi';
+import { useTelegram } from '../../hooks/useTelegram';
 import toast from 'react-hot-toast';
 
 const AllReservations = () => {

@@ -49,7 +49,7 @@ app = FastAPI()
 # Настройка CORS для API бота
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[f"{TELEGRAM_WEBAPP_URL}"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -377,7 +377,7 @@ async def cmd_admin(message: types.Message):
     
     # Сохраняем ID админа
     await message.answer(
-        "Панель управления КПК\n\n"
+        "Панель управления\n\n"
         "Выберите действие:",
         reply_markup=types.InlineKeyboardMarkup(
             inline_keyboard=[
@@ -797,7 +797,7 @@ async def back_to_admin_handler(callback: types.CallbackQuery):
     keyboard = [
         [
             types.InlineKeyboardButton(
-                text="Админка КПК 🇨🇳",
+                text="Админка",
                 web_app=types.WebAppInfo(url=webapp_admin_url)
             )
         ],
@@ -816,7 +816,7 @@ async def back_to_admin_handler(callback: types.CallbackQuery):
     ]
     
     await callback.message.edit_text(
-        "Панель управления КПК\n\n"
+        "Панель управления\n\n"
         "Выберите действие:",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
@@ -997,23 +997,21 @@ async def main():
     
     await asyncio.gather(bot_task, server_task)
 
-async def get_user_reservations(user_id):
-    """Получение списка бронирований пользователя через API бэкенда"""
+async def get_user_reservations(user_id: int) -> List[dict]:
+    logger.info(f"Запрашиваем бронирования для пользователя {user_id}")
     try:
-        logger.info(f"Запрашиваем бронирования для пользователя {user_id}")
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{BACKEND_API_URL}/user/{user_id}/reservations"
-            ) as response:
-                if response.status != 200:
+            async with session.get(f"{BACKEND_API_URL}/user/{user_id}/reservations/") as response:
+                if response.status == 200:
+                    reservations = await response.json()
+                    logger.info(f"Получено {len(reservations)} бронирований для пользователя {user_id}")
+                    logger.debug(f"Данные бронирований: {reservations}")  # Для отладки
+                    return reservations
+                else:
                     logger.error(f"Ошибка при получении бронирований: {response.status}")
                     return []
-                
-                data = await response.json()
-                logger.info(f"Получено {len(data)} бронирований для пользователя {user_id}")
-                return data
     except Exception as e:
-        logger.error(f"Ошибка при запросе бронирований пользователя {user_id}: {e}")
+        logger.error(f"Исключение при получении бронирований: {e}", exc_info=True)
         return []
 
 @dp.message(Command("reservations"))
@@ -1074,15 +1072,30 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
             await callback.answer("Бронирование не найдено", show_alert=True)
             return
         
-        # Форматируем дату
-        reserved_date = datetime.fromisoformat(reservation['reserved_at'].replace('Z', '+00:00'))
-        formatted_date = reserved_date.strftime('%d.%m.%Y %H:%M')
+        # Безопасное получение данных с значениями по умолчанию
+        goods_name = reservation.get('goods_name', 'Название не указано')
+        goods_article = reservation.get('goods_article', 'Артикул не указан')
+        quantity = reservation.get('quantity', 0)
+        price = reservation.get('goods_price', 0)
+        cashback_percent = reservation.get('goods_cashback_percent', 0)
+        reserved_at = reservation.get('reserved_at', '')
+
+        # Безопасное форматирование даты
+        try:
+            reserved_date = datetime.fromisoformat(reserved_at.replace('Z', '+00:00'))
+            formatted_date = reserved_date.strftime('%d.%m.%Y %H:%M')
+        except (ValueError, AttributeError):
+            formatted_date = 'Дата не указана'
         
         # Рассчитываем цену с кэшбеком
-        price = reservation['goods_price']
-        cashback_percent = reservation['goods_cashback_percent'] or 0
         price_with_cashback = price * (1 - cashback_percent / 100)
-        masked_article = '*' * (len(reservation['goods_article']) - 4) + reservation['goods_article'][-4:] if len(reservation['goods_article']) >= 4 else reservation['goods_article']
+        
+        # Безопасное маскирование артикула
+        if goods_article and len(goods_article) >= 4:
+            masked_article = '*' * (len(goods_article) - 4) + goods_article[-4:]
+        else:
+            masked_article = goods_article
+
         # Формируем клавиатуру
         keyboard = [
             [
@@ -1099,21 +1112,33 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
             ]
         ]
         
+        # Формируем текст сообщения с проверкой наличия данных
+        message_text = [
+            f"📦 Бронирование №{reservation_id}",
+            "",
+            f"Товар: {goods_name}"
+        ]
+        
+        if goods_article != 'Артикул не указан':
+            message_text.append(f"Артикул: {masked_article}")
+        
+        message_text.extend([
+            f"Количество: {quantity} шт.",
+            f"Цена: <s>{price} ₽</s>",
+            f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽",
+            f"Дата: {formatted_date}",
+            "",
+            "Выберите действие:"
+        ])
+        
         await callback.message.edit_text(
-            f"📦 Бронирование №{reservation_id}\n\n"
-            f"Товар: {reservation['goods_name']}\n"
-            f"Артикул: {masked_article}\n"
-            f"Количество: {reservation['quantity']} шт.\n"
-            f"Цена: <s>{price} ₽</s>\n"
-            f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽\n"
-            f"Дата: {formatted_date}\n\n"
-            "Выберите действие:",
+            "\n".join(message_text),
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
             parse_mode=ParseMode.HTML
         )
         
     except Exception as e:
-        logger.error(f"Ошибка при получении бронирования: {e}")
+        logger.error(f"Ошибка при получении бронирования: {e}", exc_info=True)
         await callback.answer("⚠️ Не удалось загрузить данные", show_alert=True)
 
 @dp.callback_query(F.data.startswith("cancel_reservation_"))

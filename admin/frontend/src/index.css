@@ -54,7 +54,7 @@
   }
   
   .table-container {
-    @apply overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700;
+    @apply w-full overflow-x-auto shadow ring-1 ring-black ring-opacity-5 md:rounded-lg;
   }
   
   .table {
@@ -102,6 +102,23 @@
 
 .highlight-animation {
   animation: highlight-pulse 1s ease-in-out 2;
+}
+
+/* Стили для скроллбара */
+.table-container::-webkit-scrollbar {
+  height: 8px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  @apply bg-gray-100 dark:bg-gray-800;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400 dark:bg-gray-500;
 }
 
 /* Удалите или закомментируйте дефолтные стили Vite, если они конфликтуют с Tailwind */

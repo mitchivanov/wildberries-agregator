@@ -19,7 +19,6 @@ import time
 from aiohttp import ClientSession
 from sqlalchemy.orm import selectinload
 from parser import parse_wildberries_url
-import math
 
 from database import get_db, init_db, close_db, AsyncScopedSession
 from models import Goods, Reservation, DailyAvailability, Category
@@ -57,7 +56,7 @@ app = FastAPI(title="Goods Admin API", lifespan=lifespan)
 # Добавляем CORS для обработки запросов с нового домена
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[f"{TELEGRAM_WEBAPP_URL}"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

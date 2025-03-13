@@ -1,6 +1,6 @@
 // src/pages/CreateCategory.jsx
 import { useEffect } from 'react';
-import { useTelegram } from '../hooks/useTelegram';
+import { useTelegram } from '../../hooks/useTelegram';
 import Layout from '../components/Layout';
 import CategoryForm from '../components/CategoryForm';
 

@@ -1,20 +1,20 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Dashboard from './pages/Dashboard';
-import GoodsPage from './pages/GoodsPage';
-import CreateGoods from './pages/CreateGoods';
-import EditGoods from './pages/EditGoods';
+import GoodsPage from './pages/products/GoodsPage';
+import CreateGoods from './pages/products/CreateGoods';
+import EditGoods from './pages/products/EditGoods';
 import { useTelegram } from './hooks/useTelegram';
 import { useEffect } from 'react';
 import Catalog from './pages/Catalog';
 import GoodsDetail from './pages/GoodsDetail';
-import AdminLogin from './pages/AdminLogin';
+import AdminLogin from './components/auth/AdminLogin';
 import ProtectedRoute from './components/ProtectedRoute';
-import AllReservations from './pages/AllReservations';
-import AllAvailability from './pages/AllAvailability';
-import Categories from './pages/Categories';
-import CreateCategory from './pages/CreateCategory';
-import EditCategory from './pages/EditCategory';
+import AllReservations from './components/reservations/AllReservations';
+import AllAvailability from './components/reservations/AllAvailability';
+import Categories from './pages/categories/Categories';
+import CreateCategory from './pages/categories/CreateCategory';
+import EditCategory from './pages/categories/EditCategory';
 
 console.log('=== Рендеринг App компонента ===');
 
