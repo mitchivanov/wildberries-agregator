@@ -1,29 +1,28 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Header
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import update, delete, or_
-from typing import List, Optional
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer
-import os
 from datetime import datetime, timedelta
-import random
-from sqlalchemy import func
-import aiohttp
-import asyncio
 import json
 import logging
-from worker import update_goods_activity
+import os
+import random
 import time
-from aiohttp import ClientSession
-from sqlalchemy.orm import selectinload
-from parser import parse_wildberries_url
 
-from database import get_db, init_db, close_db, AsyncScopedSession
+import aiohttp
+from aiohttp import ClientSession
+import asyncio
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Header
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
+from sqlalchemy import func, update, delete, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from typing import List, Optional
+
+from database import get_db, init_db, close_db
 from models import Goods, Reservation, DailyAvailability, Category
+from parser import parse_wildberries_url
 from schemas import (
-    GoodsCreate, GoodsUpdate, GoodsResponse,ReservationCreate, ReservationResponse,
+    GoodsCreate, GoodsUpdate, GoodsResponse, ReservationCreate, ReservationResponse,
     DailyAvailabilityResponse, CategoryCreate, CategoryUpdate, CategoryResponse
 )
 
@@ -771,6 +770,7 @@ async def get_user_reservations(
             "goods_name": goods.name if goods else None,
             "goods_image": goods.image if goods else None,
             "goods_price": goods.price if goods else None,
+            "goods_article": goods.article if goods else None,
             "goods_cashback_percent": goods.cashback_percent if goods else None
         }
         response_list.append(reservation_dict)

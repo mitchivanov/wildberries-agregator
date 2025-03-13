@@ -337,7 +337,8 @@ async def cmd_start(message: types.Message):
         await message.answer(
             "🛍️ Добро пожаловать в PerfumeBot!\n\n"
             "Этот бот поможет вам найти и забронировать товары с кэшбеком.\n"
-            "Используйте кнопку ниже для перехода в каталог.",
+            "Используйте кнопку ниже для перехода в каталог.\n"
+            "Также вы можете использовать команду /help для получения помощи.",
             reply_markup=types.InlineKeyboardMarkup(
                 inline_keyboard=[[
                     types.InlineKeyboardButton(
@@ -855,11 +856,14 @@ async def send_reservation_notification(request: Request):
     
     # Добавляем инструкцию по покупке, если она есть
     if purchase_guide:
-        message_text += f"<b>Инструкция по покупке:</b>\n{purchase_guide}"
+        message_text += f"<b>Инструкция по покупке:</b>\n{purchase_guide}\n\n"
     else:
         message_text += "Для получения инструкции по покупке, пожалуйста, свяжитесь с администратором.\n\n"
     
-    message_text += "\n\nБлагодарим за использование нашего сервиса! 🙏"
+    message_text += """
+                    Для управления бронированиями используйте команду /reservations
+                    Благодарим за использование нашего сервиса! 🙏
+                    """
     
     try:
         logger.info(f"Отправка уведомления о бронировании пользователю {user_id}")
@@ -902,42 +906,6 @@ async def send_reservation_notification(request: Request):
         logger.error(error_msg)
         return {"status": "error", "message": error_msg}
 
-@app.post("/notify")
-async def handle_notification(request: NotificationRequest):
-    try:
-        logger.info(f"Получен запрос на отправку уведомления пользователю {request.user_id}")
-        
-        # Расчет цены с кэшбеком
-        price = request.goods['price']
-        cashback_percent = request.goods.get('cashback_percent', 0)
-        price_with_cashback = price * (1 - cashback_percent / 100)
-        masked_article = '*' * (len(request.goods['article']) - 4) + request.goods['article'][-4:] if len(request.goods['article']) >= 4 else request.goods['article']
-        
-        message = (
-            "🎉 Новое бронирование!\n\n"
-            f"Товар: {request.goods['name']}\n"
-            f"Артикул: {masked_article}\n"
-            f"Количество: {request.quantity}\n"
-            f"Цена: <s>{price} ₽</s>\n"
-            f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽\n"
-            f"Дата: {request.reservation_date}"
-        )
-        
-        await bot.send_message(
-            chat_id=request.user_id,
-            text=message,
-            parse_mode=ParseMode.HTML
-        )
-        logger.info(f"Уведомление успешно отправлено пользователю {request.user_id}")
-        return {"status": "success"}
-    except TelegramForbiddenError:
-        error_msg = f"Пользователь {request.user_id} заблокировал бота"
-        logger.warning(error_msg)
-        raise HTTPException(status_code=403, detail=error_msg)
-    except Exception as e:
-        error_msg = f"Ошибка при отправке уведомления пользователю {request.user_id}: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
 
 # Планировщик для проверки и отправки запланированных рассылок
 async def check_scheduled_broadcasts():
@@ -1074,7 +1042,7 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
         
         # Безопасное получение данных с значениями по умолчанию
         goods_name = reservation.get('goods_name', 'Название не указано')
-        goods_article = reservation.get('goods_article', 'Артикул не указан')
+        goods_article = reservation.get('goods_article')
         quantity = reservation.get('quantity', 0)
         price = reservation.get('goods_price', 0)
         cashback_percent = reservation.get('goods_cashback_percent', 0)
@@ -1119,12 +1087,11 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
             f"Товар: {goods_name}"
         ]
         
-        if goods_article != 'Артикул не указан':
-            message_text.append(f"Артикул: {masked_article}")
         
         message_text.extend([
             f"Количество: {quantity} шт.",
             f"Цена: <s>{price} ₽</s>",
+            f"Артикул: {masked_article}",
             f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽",
             f"Дата: {formatted_date}",
             "",
@@ -1180,11 +1147,8 @@ async def close_reservations_handler(callback: types.CallbackQuery):
     
 @dp.message(Command("help"))
 async def help_command(message: types.Message):
-    await message.answer("""
-    /start - Начало работы
-    /reservations - Список бронирований
-    /categories - Список категорий
-    """)
+    await message.answer("""/start - Начало работы\n/reservations - Список бронирований\n/categories - Список категорий""")
+    
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main()) 
