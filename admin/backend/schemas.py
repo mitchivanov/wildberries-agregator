@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+from pydantic import validator
 
 # Базовые схемы для товаров
 class GoodsBase(BaseModel):
@@ -11,6 +12,7 @@ class GoodsBase(BaseModel):
     url: str
     image: str
     is_active: bool = True
+    is_hidden: bool = False
     purchase_guide: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
@@ -32,12 +34,13 @@ class GoodsUpdate(BaseModel):
     url: Optional[str] = None
     image: Optional[str] = None
     is_active: Optional[bool] = None
+    is_hidden: Optional[bool] = None
     purchase_guide: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     min_daily: Optional[int] = None
     max_daily: Optional[int] = None
-    category_id: Optional[int] = None  # Добавляем возможность обновлять категорию
+    category_id: Optional[int] = None
 
 # Схемы для категорий
 class CategoryBase(BaseModel):
@@ -119,4 +122,32 @@ class GoodsResponse(GoodsBase):
     
     class Config:
         from_attributes = True
+
+# Добавить в schemas.py
+class BulkVisibilityUpdate(BaseModel):
+    goods_ids: List[int] = Field(
+        ..., 
+        description="Список ID товаров для обновления",
+        min_items=1
+    )
+    is_hidden: bool = Field(
+        ..., 
+        description="Флаг видимости"
+    )
+
+    @validator('goods_ids')
+    def validate_goods_ids(cls, v):
+        if not v:
+            raise ValueError("Список goods_ids не может быть пустым")
+        if not all(isinstance(id, int) and id > 0 for id in v):
+            raise ValueError("Все ID должны быть положительными целыми числами")
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "goods_ids": [1, 2],
+                "is_hidden": True
+            }
+        }
 

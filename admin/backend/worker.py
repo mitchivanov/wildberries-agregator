@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from sqlalchemy import select, update
 from database import AsyncScopedSession, init_db, close_db
 from models import Goods
@@ -12,6 +13,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger('goods_activity_worker')
 
+# Константа для московского часового пояса
+MOSCOW_TZ = ZoneInfo('Europe/Moscow')
+
 async def update_goods_activity():
     """
     Обновляет статус активности товаров на основе дат начала и окончания
@@ -19,8 +23,8 @@ async def update_goods_activity():
     try:
         logger.info("Обновление статуса активности товаров...")
         async with AsyncScopedSession() as session:
-            # Получаем текущее время в UTC
-            current_time = datetime.now(timezone.utc)
+            # Получаем текущее время в Москве
+            current_time = datetime.now(MOSCOW_TZ)
             
             # Получаем все товары
             query = select(Goods)
@@ -56,18 +60,36 @@ async def update_goods_activity():
     except Exception as e:
         logger.error(f"Ошибка при обновлении статуса товаров: {e}")
 
+async def wait_until_midnight():
+    """Ждет до следующей полночи по Москве"""
+    now = datetime.now(MOSCOW_TZ)
+    tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    wait_seconds = (tomorrow - now).total_seconds()
+    
+    logger.info(f"Ожидание до полуночи по МСК: {wait_seconds} секунд")
+    logger.info(f"Следующее обновление в: {tomorrow.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    await asyncio.sleep(wait_seconds)
+
 async def run_worker():
     """
     Запускает рабочий цикл проверки активности товаров
     """
     await init_db()
-    logger.info("Воркер активности товаров запущен")
+    logger.info("Воркер активности товаров запущен (работает по московскому времени)")
     
     try:
         while True:
+            # Ждем до полуночи по МСК
+            await wait_until_midnight()
+            
+            # Выполняем обновление
             await update_goods_activity()
-            # Проверяем каждые 5 минут
-            await asyncio.sleep(300)
+            
+            # Логируем следующее время запуска
+            next_run = datetime.now(MOSCOW_TZ) + timedelta(days=1)
+            next_run = next_run.replace(hour=0, minute=0, second=0, microsecond=0)
+            logger.info(f"Следующее обновление запланировано на: {next_run.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            
     except asyncio.CancelledError:
         logger.info("Воркер активности товаров остановлен")
     finally:

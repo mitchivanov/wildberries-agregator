@@ -8,13 +8,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U socialist -d wb_aggregator"]
+      test: [ "CMD-SHELL", "pg_isready -U socialist -d wb_aggregator" ]
     networks:
       - backend-network
 
   backend:
     build: ./admin/backend
-    env_file: 
+    env_file:
       - .env
     environment:
       - DATABASE_URL
@@ -23,15 +23,24 @@ services:
       - TELEGRAM_BOT_TOKEN
       - SUPER_ADMIN_IDS
       - DEVELOPMENT_MODE
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - backend-network
       - frontend-network
-
   frontend:
-    build: ./admin/frontend
+    build:
+      context: ./admin/frontend
+      args:
+        # Добавляем args для передачи в Dockerfile
+        - VITE_API_URL=${VITE_API_URL}
+        - VITE_ADMIN_LOGIN=${VITE_ADMIN_LOGIN}
+        - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
+        - VITE_TELEGRAM_WEBAPP_URL=${VITE_TELEGRAM_WEBAPP_URL}
     volumes:
       # Монтируем сертификаты из хост-системы
       - /etc/letsencrypt:/etc/letsencrypt:ro
@@ -42,16 +51,12 @@ services:
       - backend
     networks:
       - frontend-network
-    environment:
-      - API_URL
-      - VITE_ADMIN_LOGIN=${VITE_ADMIN_LOGIN}
-      - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
-    env_file: 
+    env_file:
       - .env
 
   bot:
     build: ./admin/bot
-    env_file: 
+    env_file:
       - .env
     environment:
       - TELEGRAM_BOT_TOKEN
@@ -68,6 +73,7 @@ services:
 volumes:
   postgres_data:
 
+
 networks:
   backend-network:
-  frontend-network: 
+  frontend-network:

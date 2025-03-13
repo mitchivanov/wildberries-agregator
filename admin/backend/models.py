@@ -31,6 +31,7 @@ class Goods(Base):
     url = Column(String, index=True)
     image = Column(String, index=True)
     is_active = Column(Boolean, default=True)
+    is_hidden = Column(Boolean, default=False)
     start_date = Column(DateTime(timezone=True), nullable=True)
     end_date = Column(DateTime(timezone=True), nullable=True)
     min_daily = Column(Integer, default=1)

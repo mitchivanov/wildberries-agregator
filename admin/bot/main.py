@@ -377,7 +377,7 @@ async def cmd_admin(message: types.Message):
     
     # Сохраняем ID админа
     await message.answer(
-        "Панель управления КПК\n\n"
+        "Панель управления\n\n"
         "Выберите действие:",
         reply_markup=types.InlineKeyboardMarkup(
             inline_keyboard=[
@@ -797,7 +797,7 @@ async def back_to_admin_handler(callback: types.CallbackQuery):
     keyboard = [
         [
             types.InlineKeyboardButton(
-                text="Админка КПК 🇨🇳",
+                text="Админка",
                 web_app=types.WebAppInfo(url=webapp_admin_url)
             )
         ],
@@ -816,7 +816,7 @@ async def back_to_admin_handler(callback: types.CallbackQuery):
     ]
     
     await callback.message.edit_text(
-        "Панель управления КПК\n\n"
+        "Панель управления\n\n"
         "Выберите действие:",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
@@ -1082,7 +1082,7 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
         price = reservation['goods_price']
         cashback_percent = reservation['goods_cashback_percent'] or 0
         price_with_cashback = price * (1 - cashback_percent / 100)
-        masked_article = '*' * (len(reservation['goods_article']) - 4) + reservation['goods_article'][-4:] if len(reservation['goods_article']) >= 4 else reservation['goods_article']
+        masked_article = '*' * (len(reservation['article']) - 4) + reservation['article'][-4:] if len(reservation['article']) >= 4 else reservation['article']
         # Формируем клавиатуру
         keyboard = [
             [

@@ -43,7 +43,7 @@ def check_if_exists(conn, query, params=None):
         return cursor.fetchone()[0]
 
 def run_migration():
-    """Выполняет миграцию для таблицы категорий"""
+    """Выполняет миграцию для добавления поля is_hidden"""
     conn = None
     try:
         # Подключаемся к базе данных
@@ -51,107 +51,42 @@ def run_migration():
         conn = psycopg2.connect(**DB_PARAMS)
         conn.autocommit = False
         
-        # 1. Проверяем существование таблицы категорий
-        table_exists_query = """
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'categories'
-            );
-        """
-        categories_exists = check_if_exists(conn, table_exists_query)
-        
-        # 2. Создаем таблицу категорий если не существует
-        if not categories_exists:
-            create_categories_sql = """
-            CREATE TABLE categories (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                description TEXT,
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-            );
-            CREATE INDEX ix_categories_id ON categories (id);
-            """
-            if not execute_sql(conn, create_categories_sql, description="Создана таблица категорий"):
-                conn.rollback()
-                return False
-        else:
-            logger.info("ℹ️ Таблица категорий уже существует")
-        
-        # 3. Проверяем существование колонки category_id в goods
+        # 1. Проверяем существование колонки is_hidden
         column_exists_query = """
             SELECT EXISTS (
                 SELECT FROM information_schema.columns 
                 WHERE table_schema = 'public' 
                 AND table_name = 'goods' 
-                AND column_name = 'category_id'
+                AND column_name = 'is_hidden'
             );
         """
         column_exists = check_if_exists(conn, column_exists_query)
         
-        # 4. Добавляем колонку category_id если не существует
+        # 2. Добавляем колонку is_hidden если не существует
         if not column_exists:
             add_column_sql = """
-            ALTER TABLE goods ADD COLUMN category_id INTEGER;
-            """
-            if not execute_sql(conn, add_column_sql, description="Добавлена колонка category_id в таблицу goods"):
-                conn.rollback()
-                return False
-        else:
-            logger.info("ℹ️ Колонка category_id уже существует")
-        
-        # 5. Проверяем существование внешнего ключа
-        fk_exists_query = """
-            SELECT EXISTS (
-                SELECT FROM information_schema.table_constraints 
-                WHERE constraint_name = 'fk_goods_category_id' 
-                AND table_name = 'goods'
-            );
-        """
-        fk_exists = check_if_exists(conn, fk_exists_query)
-        
-        # 6. Добавляем внешний ключ если не существует
-        if not fk_exists:
-            add_fk_sql = """
             ALTER TABLE goods 
-            ADD CONSTRAINT fk_goods_category_id 
-            FOREIGN KEY (category_id) REFERENCES categories(id) 
-            ON DELETE SET NULL;
+            ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
             """
-            if not execute_sql(conn, add_fk_sql, description="Добавлен внешний ключ fk_goods_category_id"):
+            if not execute_sql(conn, add_column_sql, description="Добавлена колонка is_hidden в таблицу goods"):
+                conn.rollback()
+                return False
+            
+            # Создаем индекс для оптимизации запросов
+            create_index_sql = """
+            CREATE INDEX ix_goods_is_hidden ON goods (is_hidden);
+            """
+            if not execute_sql(conn, create_index_sql, description="Создан индекс для колонки is_hidden"):
                 conn.rollback()
                 return False
         else:
-            logger.info("ℹ️ Внешний ключ fk_goods_category_id уже существует")
+            logger.info("ℹ️ Колонка is_hidden уже существует")
         
-        # 7. Проверяем существование таблицы alembic_version
-        alembic_exists_query = """
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'alembic_version'
-            );
-        """
-        alembic_exists = check_if_exists(conn, alembic_exists_query)
-        
-        # 8. Создаем таблицу alembic_version если нужно
-        if not alembic_exists:
-            create_alembic_sql = """
-            CREATE TABLE alembic_version (
-                version_num VARCHAR(32) NOT NULL PRIMARY KEY
-            );
-            """
-            if not execute_sql(conn, create_alembic_sql, description="Создана таблица alembic_version"):
-                conn.rollback()
-                return False
-        
-        # 9. Обновляем версию миграции
+        # 3. Обновляем версию миграции
         update_version_sql = """
-        INSERT INTO alembic_version (version_num) 
-        VALUES ('a5b1c3d4e5f6') 
-        ON CONFLICT (version_num) DO NOTHING;
+        UPDATE alembic_version 
+        SET version_num = 'add_is_hidden_column'
+        WHERE version_num = 'a5b1c3d4e5f6';
         """
         if not execute_sql(conn, update_version_sql, description="Обновлена версия миграции"):
             conn.rollback()
@@ -172,7 +107,7 @@ def run_migration():
             conn.close()
 
 if __name__ == "__main__":
-    logger.info("🚀 Запуск прямой миграции для таблицы категорий...")
+    logger.info("🚀 Запуск прямой миграции для добавления поля is_hidden...")
     if not run_migration():
         logger.error("❌ Миграция завершилась с ошибкой")
         sys.exit(1)

@@ -1,5 +1,10 @@
 FROM python:3.12-slim
 
+
+#чтобы Python писал логи без задержки
+ENV PYTHONUNBUFFERED=1  
+
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -7,6 +12,9 @@ RUN pip install --no-cache-dir -r requirements.txt psycopg2-binary
 
 # Устанавливаем postgresql-client для pg_isready
 RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
+
+# Создаем директорию для логов, даем права
+RUN mkdir -p /app/logs && chmod 777 /app/logs
 
 # Копируем все Python файлы
 COPY *.py ./
@@ -24,9 +32,10 @@ COPY run_migrations.py ./
 # Копируем файлы для прямой миграции
 COPY direct_migration.py ./
 
-# Делаем entrypoint.sh исполняемым
+# Копируем и фиксим entrypoint
 COPY entrypoint.sh ./
-RUN chmod +x entrypoint.sh
+RUN chmod +x entrypoint.sh && \
+    sed -i 's/\r$//' entrypoint.sh  # Эта строка конвертирует CRLF в LF
 
 # Запуск через entrypoint
-CMD ["./entrypoint.sh"] 
+CMD ["./entrypoint.sh"]

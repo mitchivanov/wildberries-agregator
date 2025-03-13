@@ -20,17 +20,56 @@ from aiohttp import ClientSession
 from sqlalchemy.orm import selectinload
 from parser import parse_wildberries_url
 import math
+from logging.handlers import RotatingFileHandler
+from pydantic import ValidationError
 
 from database import get_db, init_db, close_db, AsyncScopedSession
 from models import Goods, Reservation, DailyAvailability, Category
 from schemas import (
     GoodsCreate, GoodsUpdate, GoodsResponse,ReservationCreate, ReservationResponse,
-    DailyAvailabilityResponse, CategoryCreate, CategoryUpdate, CategoryResponse
+    DailyAvailabilityResponse, CategoryCreate, CategoryUpdate, CategoryResponse,
+    BulkVisibilityUpdate
 )
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Настраиваем базовую конфигурацию, чтобы логи сразу уходили в stdout (для docker logs)
+logging.basicConfig(
+    level=logging.DEBUG,  # Максимум информации
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# Убедимся, что буферизация отключена, чтобы логи писались сразу
+# (Это дополнительно можно указать через переменную окружения PYTHONUNBUFFERED=1)
+
+# Создаем директорию для логов
+log_dir = "/app/logs"
+os.makedirs(log_dir, exist_ok=True)
+
+# Обработчик для записи в файл
+file_handler = RotatingFileHandler(
+    os.path.join(log_dir, "api.log"),
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,
+    encoding='utf-8'
+)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(levelname)s - %(message)s'
+))
+
+# Обработчик для вывода в консоль (stdout), чтобы видеть логи через docker logs
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+console_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(levelname)s - %(message)s'
+))
+
+# Настраиваем наш логгер
+logger = logging.getLogger('api')
+logger.setLevel(logging.DEBUG)
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+# Теперь все логи через logger.info/error/debug будут писаться и в файл, и в docker logs.
 
 # Получаем токен из окружения
 # Добавляем режим разработки
@@ -572,9 +611,10 @@ async def get_catalog(
     # Автоматически очищаем устаревшие записи
     await clean_expired_availability(db)
     
-    # Остальной код эндпоинта без изменений
+    # Добавляем условие is_hidden=False
     query = select(Goods).where(
         Goods.is_active == True,
+        Goods.is_hidden == False,  # Добавляем фильтр по скрытым товарам
         Goods.start_date <= current_date,
         Goods.end_date >= current_date
     )
@@ -767,6 +807,7 @@ async def get_user_reservations(
             "id": item.id,
             "user_id": item.user_id,
             "goods_id": item.goods_id,
+            "article": item.article,
             "quantity": item.quantity,
             "reserved_at": item.reserved_at,
             "goods_name": goods.name if goods else None,
@@ -1114,6 +1155,95 @@ async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
     
     return None
+
+@app.put("/goods/{goods_id}/visibility", response_model=GoodsResponse)
+async def toggle_goods_visibility(
+    goods_id: int,
+    is_hidden: bool,
+    db: AsyncSession = Depends(get_db)
+):
+    """Скрыть или показать товар"""
+    result = await db.execute(select(Goods).filter(Goods.id == goods_id))
+    goods = result.scalars().first()
+    
+    if goods is None:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    
+    await db.execute(
+        update(Goods)
+        .where(Goods.id == goods_id)
+        .values(is_hidden=is_hidden)
+    )
+    await db.commit()
+    
+    # Получаем обновленный товар
+    result = await db.execute(
+        select(Goods)
+        .options(selectinload(Goods.category))
+        .filter(Goods.id == goods_id)
+    )
+    updated_goods = result.scalars().first()
+    
+    return updated_goods
+
+@app.put("/goods/bulk/visibility", response_model=List[GoodsResponse])
+async def bulk_toggle_goods_visibility(
+    request: BulkVisibilityUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Массовое обновление видимости товаров"""
+    logger.info(f"Получен запрос на обновление видимости товаров: {request.model_dump()}")
+    
+    try:
+        # Проверяем существование товаров
+        goods_query = select(Goods).filter(Goods.id.in_(request.goods_ids))
+        result = await db.execute(goods_query)
+        existing_goods = result.scalars().all()
+        
+        if not existing_goods:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Товары с ID {request.goods_ids} не найдены"
+            )
+        
+        # Обновляем видимость товаров
+        update_stmt = (
+            update(Goods)
+            .where(Goods.id.in_(request.goods_ids))
+            .values(
+                is_hidden=request.is_hidden,
+                updated_at=func.now()
+            )
+        )
+        await db.execute(update_stmt)
+        
+        # Получаем обновленные товары
+        query = (
+            select(Goods)
+            .options(
+                selectinload(Goods.category),
+                selectinload(Goods.daily_availability),
+                selectinload(Goods.reservations)
+            )
+            .filter(Goods.id.in_(request.goods_ids))
+        )
+        
+        result = await db.execute(query)
+        updated_goods = result.scalars().all()
+        
+        await db.commit()
+        logger.info(f"Успешно обновлена видимость для товаров: {request.goods_ids}")
+        
+        return updated_goods
+        
+    except ValidationError as e:
+        logger.error(f"Ошибка валидации: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Для тестирования приложения
 if __name__ == "__main__":

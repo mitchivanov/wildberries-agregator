@@ -3,9 +3,12 @@ import axios from 'axios';
 import { toast } from 'react-hot-toast';
 import { useTelegram } from './useTelegram';
 
+
+const VITE_API_URL = import.meta.env.VITE_API_URL;
+
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'https://develooper.ru/api',
+  baseURL: 'https://4791-89-169-52-137.ngrok-free.app/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -285,6 +288,40 @@ export const useApi = () => {
     return result;
   }, [request]);
 
+  const toggleGoodsVisibility = useCallback(async (goodsId, isHidden) => {
+    console.log(`${isHidden ? 'Скрытие' : 'Показ'} товара ${goodsId}`);
+    const result = await request('put', `/goods/${goodsId}/visibility`, {
+      is_hidden: isHidden
+    });
+    
+  }, [request]);
+
+  const bulkToggleGoodsVisibility = useCallback(async (goodsIds, isHidden) => {
+    try {
+        // Убедимся, что данные правильно форматированы
+        const payload = {
+            goods_ids: goodsIds.map(id => Number(id)),
+            is_hidden: Boolean(isHidden)
+        };
+
+        console.log('Отправляемый payload:', payload);
+
+        const response = await api({
+            method: 'put',
+            url: '/goods/bulk/visibility',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            data: payload
+        });
+
+        return response.data;
+    } catch (error) {
+        console.error('Ошибка при обновлении видимости:', error.response?.data || error);
+        throw error;
+    }
+  }, []);
+
   return {
     loading,
     error,
@@ -303,6 +340,7 @@ export const useApi = () => {
     getCategoryById,
     deleteCategory,
     createCategory,
-    updateCategory
+    updateCategory,
+    bulkToggleGoodsVisibility
   };
 }; 
