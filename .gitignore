@@ -172,3 +172,16 @@ cython_debug/
 
 
 *.csv
+
+*.log
+*.log.*
+*.log.*.*
+*.log.*.*.*
+*.log.*.*.*.*
+*.log.*.*.*.*.*
+*.log.*.*.*.*.*.*
+
+nginx.conf
+nginx.conf.*
+
+*.conf
