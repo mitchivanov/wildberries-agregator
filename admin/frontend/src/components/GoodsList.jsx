@@ -7,7 +7,7 @@ import SearchBar from './SearchBar';
 import toast from 'react-hot-toast';
 
 const GoodsList = () => {
-  const { getGoods, searchGoods, deleteGoods, bulkToggleGoodsVisibility } = useApi();
+  const { getGoods, searchGoods, deleteGoods, bulkHideGoods, bulkShowGoods } = useApi();
   const { isDarkMode, webApp } = useTelegram();
   const navigate = useNavigate();
 
@@ -195,23 +195,40 @@ const GoodsList = () => {
     }
   };
 
-  const handleBulkVisibility = async (isHidden) => {
+  const handleBulkHide = async () => {
     if (selectedGoods.size === 0) {
-      toast.error(`Выберите товары для ${isHidden ? 'скрытия' : 'показа'}`);
+      toast.error('Выберите товары для скрытия');
       return;
     }
     
     try {
-      const goodsIdsArray = Array.from(selectedGoods);
-      console.log("IDs для отправки:", goodsIdsArray);
+      const goodsIdsArray = Array.from(selectedGoods).map(Number);
+      console.log("Скрытие товаров:", goodsIdsArray);
+      console.log("Типы ID:", goodsIdsArray.map(id => typeof id));
       
-      await bulkToggleGoodsVisibility(goodsIdsArray, isHidden);
-      
-      toast.success(`Товары успешно ${isHidden ? 'скрыты' : 'показаны'}`);
-      setSelectedGoods(new Set());
+      await bulkHideGoods(goodsIdsArray);
       await loadGoods();
     } catch (err) {
-      console.error("Ошибка при изменении видимости:", err);
+      console.error("Ошибка при скрытии товаров:", err);
+      toast.error(`Ошибка: ${err.message}`);
+    }
+  };
+
+  const handleBulkShow = async () => {
+    if (selectedGoods.size === 0) {
+      toast.error('Выберите товары для показа');
+      return;
+    }
+    
+    try {
+      const goodsIdsArray = Array.from(selectedGoods).map(Number);
+      console.log("Показ товаров:", goodsIdsArray);
+      console.log("Типы ID:", goodsIdsArray.map(id => typeof id));
+      
+      await bulkShowGoods(goodsIdsArray);
+      await loadGoods();
+    } catch (err) {
+      console.error("Ошибка при показе товаров:", err);
       toast.error(`Ошибка: ${err.message}`);
     }
   };
@@ -230,13 +247,16 @@ const GoodsList = () => {
   };
 
   const handleSelectItem = (id) => {
-    const newSelected = new Set(selectedGoods);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedGoods(newSelected);
+    setSelectedGoods(prev => {
+      const newSelected = new Set(prev);
+      const numericId = Number(id);
+      if (newSelected.has(numericId)) {
+        newSelected.delete(numericId);
+      } else {
+        newSelected.add(numericId);
+      }
+      return newSelected;
+    });
   };
 
   return (
@@ -278,13 +298,13 @@ const GoodsList = () => {
           <span>Выбрано товаров: {selectedGoods.size}</span>
           <div className="space-x-2">
             <button
-              onClick={() => handleBulkVisibility(true)}
+              onClick={handleBulkHide}
               className="btn btn-warning"
             >
               Скрыть выбранные
             </button>
             <button
-              onClick={() => handleBulkVisibility(false)}
+              onClick={handleBulkShow}
               className="btn btn-success"
             >
               Показать выбранные
@@ -351,7 +371,16 @@ const GoodsList = () => {
                       </thead>
                       <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700 bg-gray-800' : 'divide-gray-200 bg-white'}`}>
                         {sortedGoods.map((item) => (
-                          <tr key={item.id} className={isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
+                          <tr 
+                            key={item.id} 
+                            className={`
+                              ${isDarkMode 
+                                ? item.is_hidden ? 'bg-gray-900 hover:bg-gray-800' : 'hover:bg-gray-700' 
+                                : item.is_hidden ? 'bg-gray-100 hover:bg-gray-200' : 'hover:bg-gray-50'}
+                              ${highlightedGoodsId === parseInt(item.id) ? 'border-l-4 border-blue-500' : ''}
+                            `}
+                            id={`goods-row-${item.id}`}
+                          >
                             <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                               <input
                                 type="checkbox"
@@ -416,13 +445,25 @@ const GoodsList = () => {
                                 {item.is_active ? 'Активен' : 'Неактивен'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                              <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                item.is_hidden 
-                                  ? isDarkMode ? 'bg-red-800 text-red-100' : 'bg-red-100 text-red-800'
-                                  : isDarkMode ? 'bg-green-800 text-green-100' : 'bg-green-100 text-green-800'
-                              }`}>
-                                {item.is_hidden ? 'Скрыт' : 'Виден'}
+                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                              <span className="flex items-center">
+                                {item.is_hidden ? (
+                                  <span className="inline-flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                      <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
+                                      <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
+                                    </svg>
+                                    <span className="text-red-500">Скрыт</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                      <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                                      <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                                    </svg>
+                                    <span className="text-green-500">Виден</span>
+                                  </span>
+                                )}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

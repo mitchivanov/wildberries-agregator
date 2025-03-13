@@ -47,19 +47,18 @@ const Catalog = () => {
     try {
       const data = await getGoods();
       if (data) {
-        // Проверяем, что data это массив перед использованием filter
-        const activeGoods = Array.isArray(data) 
-          ? data.filter(item => item.is_active) 
+        // Фильтруем активные и не скрытые товары
+        const availableGoods = Array.isArray(data) 
+          ? data.filter(item => item.is_active && !item.is_hidden) 
           : [];
-        setGoods(activeGoods);
+        setGoods(availableGoods);
         
-        // Получаем данные о доступности для всех активных товаров на сегодня
+        // Получаем данные о доступности для всех доступных товаров на сегодня
         const today = new Date().toISOString().split('T')[0];
         const availabilityMap = {};
         
-        // Убедимся, что activeGoods - массив
-        if (Array.isArray(activeGoods) && activeGoods.length > 0) {
-          activeGoods.forEach(item => {
+        if (Array.isArray(availableGoods) && availableGoods.length > 0) {
+          availableGoods.forEach(item => {
             if (item.daily_availability && item.daily_availability.length > 0) {
               const todayAvailability = item.daily_availability.find(av => 
                 av.date.split('T')[0] === today
@@ -72,7 +71,7 @@ const Catalog = () => {
           
           setAvailabilityData(availabilityMap);
           
-          if (data.length > 0 && activeGoods.length === 0) {
+          if (data.length > 0 && availableGoods.length === 0) {
             toast.info('В настоящее время нет доступных товаров');
           }
         }
@@ -94,22 +93,20 @@ const Catalog = () => {
     setIsSearching(true);
     try {
       const data = await searchGoods(query);
-      // Добавим отладочный вывод результатов поиска
       console.log('Результаты поиска:', data);
       
-      // Проверяем, что data это массив перед использованием filter
-      const activeGoods = Array.isArray(data) 
-        ? data.filter(item => item.is_active) 
+      // Фильтруем активные и не скрытые товары
+      const availableGoods = Array.isArray(data) 
+        ? data.filter(item => item.is_active && !item.is_hidden) 
         : [];
-      setGoods(activeGoods);
+      setGoods(availableGoods);
       
-      // Получаем данные о доступности для всех найденных товаров на сегодня
+      // Получаем данные о доступности
       const today = new Date().toISOString().split('T')[0];
       const availabilityMap = {};
       
-      // Убедимся, что activeGoods - массив
-      if (Array.isArray(activeGoods) && activeGoods.length > 0) {
-        activeGoods.forEach(item => {
+      if (Array.isArray(availableGoods) && availableGoods.length > 0) {
+        availableGoods.forEach(item => {
           if (item.daily_availability && item.daily_availability.length > 0) {
             const todayAvailability = item.daily_availability.find(av => 
               av.date.split('T')[0] === today

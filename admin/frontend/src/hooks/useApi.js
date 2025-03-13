@@ -8,7 +8,7 @@ const VITE_API_URL = import.meta.env.VITE_API_URL;
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'https://4791-89-169-52-137.ngrok-free.app/api',
+  baseURL: 'https://develooper.ru/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -82,10 +82,10 @@ export const useApi = () => {
     }
   }, []);
 
-  // Получение всех товаров
-  const getGoods = useCallback(async () => {
-    console.log('Запрос списка товаров');
-    return request('get', '/goods/');
+  // Получение всех товаров, включая скрытые (для админки)
+  const getGoods = useCallback(async (includeHidden = true) => {
+    console.log('Запрос списка товаров, include_hidden:', includeHidden);
+    return request('get', `/goods/?include_hidden=${includeHidden}`);
   }, [request]);
 
   // Поиск товаров
@@ -288,39 +288,56 @@ export const useApi = () => {
     return result;
   }, [request]);
 
-  const toggleGoodsVisibility = useCallback(async (goodsId, isHidden) => {
-    console.log(`${isHidden ? 'Скрытие' : 'Показ'} товара ${goodsId}`);
-    const result = await request('put', `/goods/${goodsId}/visibility`, {
-      is_hidden: isHidden
-    });
-    
-  }, [request]);
 
-  const bulkToggleGoodsVisibility = useCallback(async (goodsIds, isHidden) => {
+  const bulkHideGoods = useCallback(async (goodsIds) => {
     try {
-        // Убедимся, что данные правильно форматированы
+        // Убедимся, что все ID являются числами
         const payload = {
-            goods_ids: goodsIds.map(id => Number(id)),
-            is_hidden: Boolean(isHidden)
+            goods_ids: Array.from(goodsIds).map(Number)
         };
 
-        console.log('Отправляемый payload:', payload);
+        console.log('Отправка запроса на скрытие товаров:', payload);
+        console.log('Тип данных goods_ids:', payload.goods_ids.map(id => typeof id));
 
-        const response = await api({
-            method: 'put',
-            url: '/goods/bulk/visibility',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            data: payload
-        });
-
-        return response.data;
+        const response = await request('put', '/goods/bulk/hide', payload);
+        
+        if (!response.error) {
+            toast.success('Товары успешно скрыты');
+            // Сбрасываем кэш списка товаров
+            queryCache.delete('/goods/');
+        }
+        
+        return response;
     } catch (error) {
-        console.error('Ошибка при обновлении видимости:', error.response?.data || error);
+        console.error('Ошибка при скрытии товаров:', error.response?.data || error);
         throw error;
     }
-  }, []);
+  }, [request]);
+
+  const bulkShowGoods = useCallback(async (goodsIds) => {
+    try {
+        // Убедимся, что все ID являются числами
+        const payload = {
+            goods_ids: Array.from(goodsIds).map(Number)
+        };
+
+        console.log('Отправка запроса на показ товаров:', payload);
+        console.log('Тип данных goods_ids:', payload.goods_ids.map(id => typeof id));
+
+        const response = await request('put', '/goods/bulk/show', payload);
+        
+        if (!response.error) {
+            toast.success('Товары успешно показаны');
+            // Сбрасываем кэш списка товаров
+            queryCache.delete('/goods/');
+        }
+        
+        return response;
+    } catch (error) {
+        console.error('Ошибка при показе товаров:', error.response?.data || error);
+        throw error;
+    }
+  }, [request]);
 
   return {
     loading,
@@ -341,6 +358,7 @@ export const useApi = () => {
     deleteCategory,
     createCategory,
     updateCategory,
-    bulkToggleGoodsVisibility
+    bulkHideGoods,
+    bulkShowGoods
   };
 }; 

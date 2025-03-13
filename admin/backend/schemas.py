@@ -125,29 +125,17 @@ class GoodsResponse(GoodsBase):
 
 # Добавить в schemas.py
 class BulkVisibilityUpdate(BaseModel):
-    goods_ids: List[int] = Field(
-        ..., 
-        description="Список ID товаров для обновления",
-        min_items=1
-    )
-    is_hidden: bool = Field(
-        ..., 
-        description="Флаг видимости"
-    )
+    goods_ids: List[int] = Field(..., description="Список ID товаров для обновления")
 
     @validator('goods_ids')
     def validate_goods_ids(cls, v):
         if not v:
-            raise ValueError("Список goods_ids не может быть пустым")
-        if not all(isinstance(id, int) and id > 0 for id in v):
-            raise ValueError("Все ID должны быть положительными целыми числами")
-        return v
+            raise ValueError("Список товаров не может быть пустым")
+        return [int(id) for id in v]  # Убедимся, что все ID - целые числа
 
     class Config:
         json_schema_extra = {
             "example": {
-                "goods_ids": [1, 2],
-                "is_hidden": True
+                "goods_ids": [1, 2, 3]
             }
         }
-

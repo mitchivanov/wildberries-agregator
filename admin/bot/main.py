@@ -859,7 +859,8 @@ async def send_reservation_notification(request: Request):
     else:
         message_text += "Для получения инструкции по покупке, пожалуйста, свяжитесь с администратором.\n\n"
     
-    message_text += "\n\nБлагодарим за использование нашего сервиса! 🙏"
+    message_text += "\n\nБлагодарим за использование нашего сервиса! 🙏\n\n"
+    message_text += "Для управления бронированиями, пожалуйста, используйте команду /reservations"
     
     try:
         logger.info(f"Отправка уведомления о бронировании пользователю {user_id}")
@@ -1082,7 +1083,6 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
         price = reservation['goods_price']
         cashback_percent = reservation['goods_cashback_percent'] or 0
         price_with_cashback = price * (1 - cashback_percent / 100)
-        masked_article = '*' * (len(reservation['article']) - 4) + reservation['article'][-4:] if len(reservation['article']) >= 4 else reservation['article']
         # Формируем клавиатуру
         keyboard = [
             [
@@ -1102,7 +1102,6 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
         await callback.message.edit_text(
             f"📦 Бронирование №{reservation_id}\n\n"
             f"Товар: {reservation['goods_name']}\n"
-            f"Артикул: {masked_article}\n"
             f"Количество: {reservation['quantity']} шт.\n"
             f"Цена: <s>{price} ₽</s>\n"
             f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽\n"

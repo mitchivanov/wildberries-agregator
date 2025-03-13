@@ -264,98 +264,51 @@ async def create_goods(goods: GoodsCreate, db: AsyncSession = Depends(get_db)):
     return goods_dict
 
 @app.get("/goods/", response_model=List[GoodsResponse], dependencies=[Depends(verify_telegram_user)])
-async def read_all_goods(
-    skip: int = 0, 
+async def read_goods(
+    search: Optional[str] = None,
+    skip: int = 0,
     limit: int = 100,
-    name: Optional[str] = None,
-    min_price: Optional[int] = None,
-    max_price: Optional[int] = None,
-    article: Optional[str] = None,
-    is_active: Optional[bool] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    include_hidden: bool = False  # По умолчанию скрытые товары не включаются
 ):
-    """Получить список всех товаров с пагинацией и фильтрацией"""
-    # Создаем базовый запрос на товары
-    query = select(Goods)
-    
-    # Применяем фильтры
-    if name:
-        query = query.filter(Goods.name.ilike(f"%{name}%"))
-    if min_price is not None:
-        query = query.filter(Goods.price >= min_price)
-    if max_price is not None:
-        query = query.filter(Goods.price <= max_price)
-    if article:
-        query = query.filter(Goods.article.ilike(f"%{article}%"))
-    if is_active is not None:
-        query = query.filter(Goods.is_active == is_active)
-    
-    # Применяем пагинацию
-    query = query.offset(skip).limit(limit)
-    
-    result = await db.execute(query)
-    goods_list = result.scalars().all()
-    
-    # Загружаем доступность товаров на сегодняшний день
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    # Загружаем информацию о категориях
-    category_ids = [goods.category_id for goods in goods_list if goods.category_id is not None]
-    category_dict = {}
-    
-    if category_ids:
-        category_query = select(Category).filter(Category.id.in_(category_ids))
-        category_result = await db.execute(category_query)
-        category_dict = {category.id: category for category in category_result.scalars().all()}
-    
-    response_goods = []
-    
-    for goods in goods_list:
-        # Выполняем отдельный запрос для получения доступности
-        availability_query = select(DailyAvailability).filter(
-            DailyAvailability.goods_id == goods.id,
-            DailyAvailability.date >= today
+    """Получить список всех товаров с фильтрацией"""
+    try:
+        logger.info(f"Запрос товаров: search={search}, include_hidden={include_hidden}")
+        
+        query = select(Goods).options(
+            selectinload(Goods.daily_availability),
+            selectinload(Goods.category),
+            selectinload(Goods.reservations)  # Добавляем загрузку резерваций
         )
-        availability_result = await db.execute(availability_query)
-        availability = availability_result.scalars().all()
+
+        # Применяем поиск, если указан
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    Goods.name.ilike(search_pattern),
+                    Goods.article.ilike(search_pattern)
+                )
+            )
+
+        # Фильтруем скрытые товары только если include_hidden=False
+        if not include_hidden:
+            query = query.where(Goods.is_hidden == False)
+
+        # Применяем пагинацию
+        query = query.offset(skip).limit(limit)
         
-        # Создаем словарь для ответа
-        goods_dict = {
-            "id": goods.id,
-            "name": goods.name,
-            "price": goods.price,
-            "cashback_percent": goods.cashback_percent,
-            "article": goods.article,
-            "url": goods.url,
-            "image": goods.image,
-            "is_active": goods.is_active,
-            "purchase_guide": goods.purchase_guide,
-            "start_date": goods.start_date,
-            "end_date": goods.end_date,
-            "min_daily": goods.min_daily,
-            "max_daily": goods.max_daily,
-            "created_at": goods.created_at,
-            "updated_at": goods.updated_at,
-            "daily_availability": [
-                {
-                    "id": item.id,
-                    "goods_id": item.goods_id,
-                    "date": item.date,
-                    "available_quantity": item.available_quantity
-                }
-                for item in availability
-            ],
-            "category": {
-                "id": category_dict.get(goods.category_id, None).id,
-                "name": category_dict.get(goods.category_id, None).name,
-                "description": category_dict.get(goods.category_id, None).description,
-                "is_active": category_dict.get(goods.category_id, None).is_active
-            } if goods.category_id else None
-        }
+        result = await db.execute(query)
+        goods = result.scalars().all()
         
-        response_goods.append(goods_dict)
-    
-    return response_goods
+        logger.info(f"Найдено товаров: {len(goods)}")
+        return goods
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка товаров: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при получении списка товаров: {str(e)}"
+        )
 
 @app.get("/goods/search/", response_model=List[GoodsResponse])
 async def search_goods(
@@ -365,16 +318,27 @@ async def search_goods(
     """
     Поиск товаров по имени или артикулу
     """
-    query = select(Goods).filter(
-        or_(
-            Goods.name.ilike(f"%{q}%"),
-            Goods.article.ilike(f"%{q}%")
+    try:
+        query = select(Goods).options(
+            selectinload(Goods.daily_availability),
+            selectinload(Goods.category),
+            selectinload(Goods.reservations)  # Добавляем загрузку резерваций
+        ).filter(
+            or_(
+                Goods.name.ilike(f"%{q}%"),
+                Goods.article.ilike(f"%{q}%")
+            )
+        ).limit(50)
+        
+        result = await db.execute(query)
+        goods = result.scalars().all()
+        return goods
+    except Exception as e:
+        logger.error(f"Ошибка при поиске товаров: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при поиске товаров: {str(e)}"
         )
-    ).limit(50)
-    
-    result = await db.execute(query)
-    goods = result.scalars().all()
-    return goods
 
 @app.get("/goods/{goods_id}", response_model=GoodsResponse, dependencies=[Depends(verify_telegram_user)])
 async def read_goods(goods_id: int, db: AsyncSession = Depends(get_db)):
@@ -605,36 +569,47 @@ async def get_catalog(
     db: AsyncSession = Depends(get_db)
 ):
     """Получить список доступных товаров на текущую дату"""
-    if current_date is None:
-        current_date = datetime.now()
-    
-    # Автоматически очищаем устаревшие записи
-    await clean_expired_availability(db)
-    
-    # Добавляем условие is_hidden=False
-    query = select(Goods).where(
-        Goods.is_active == True,
-        Goods.is_hidden == False,  # Добавляем фильтр по скрытым товарам
-        Goods.start_date <= current_date,
-        Goods.end_date >= current_date
-    )
-    
-    result = await db.execute(query)
-    goods = result.scalars().all()
-    
-    # Проверяем наличие доступных товаров на текущую дату
-    available_goods = []
-    for item in goods:
-        availability_query = select(DailyAvailability).where(
-            DailyAvailability.goods_id == item.id,
-            DailyAvailability.date == current_date.replace(hour=0, minute=0, second=0, microsecond=0),
-            DailyAvailability.available_quantity > 0
+    try:
+        if current_date is None:
+            current_date = datetime.now()
+        
+        # Автоматически очищаем устаревшие записи
+        await clean_expired_availability(db)
+        
+        # Добавляем условие is_hidden=False и загрузку связанных данных
+        query = select(Goods).options(
+            selectinload(Goods.daily_availability),
+            selectinload(Goods.category),
+            selectinload(Goods.reservations)  # Добавляем загрузку резерваций
+        ).where(
+            Goods.is_active == True,
+            Goods.is_hidden == False,
+            Goods.start_date <= current_date,
+            Goods.end_date >= current_date
         )
-        availability_result = await db.execute(availability_query)
-        if availability_result.scalars().first():
-            available_goods.append(item)
-    
-    return available_goods
+        
+        result = await db.execute(query)
+        goods = result.scalars().all()
+        
+        # Проверяем наличие доступных товаров на текущую дату
+        available_goods = []
+        for item in goods:
+            availability_query = select(DailyAvailability).where(
+                DailyAvailability.goods_id == item.id,
+                DailyAvailability.date == current_date.replace(hour=0, minute=0, second=0, microsecond=0),
+                DailyAvailability.available_quantity > 0
+            )
+            availability_result = await db.execute(availability_query)
+            if availability_result.scalars().first():
+                available_goods.append(item)
+        
+        return available_goods
+    except Exception as e:
+        logger.error(f"Ошибка при получении каталога: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при получении каталога: {str(e)}"
+        )
 
 @app.get("/catalog/{goods_id}", response_model=GoodsResponse)
 async def get_goods_details(
@@ -807,7 +782,6 @@ async def get_user_reservations(
             "id": item.id,
             "user_id": item.user_id,
             "goods_id": item.goods_id,
-            "article": item.article,
             "quantity": item.quantity,
             "reserved_at": item.reserved_at,
             "goods_name": goods.name if goods else None,
@@ -1156,94 +1130,104 @@ async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
     
     return None
 
-@app.put("/goods/{goods_id}/visibility", response_model=GoodsResponse)
-async def toggle_goods_visibility(
-    goods_id: int,
-    is_hidden: bool,
-    db: AsyncSession = Depends(get_db)
-):
-    """Скрыть или показать товар"""
-    result = await db.execute(select(Goods).filter(Goods.id == goods_id))
-    goods = result.scalars().first()
-    
-    if goods is None:
-        raise HTTPException(status_code=404, detail="Товар не найден")
-    
-    await db.execute(
-        update(Goods)
-        .where(Goods.id == goods_id)
-        .values(is_hidden=is_hidden)
-    )
-    await db.commit()
-    
-    # Получаем обновленный товар
-    result = await db.execute(
-        select(Goods)
-        .options(selectinload(Goods.category))
-        .filter(Goods.id == goods_id)
-    )
-    updated_goods = result.scalars().first()
-    
-    return updated_goods
 
-@app.put("/goods/bulk/visibility", response_model=List[GoodsResponse])
-async def bulk_toggle_goods_visibility(
-    request: BulkVisibilityUpdate,
+@app.put("/goods/bulk/hide", status_code=status.HTTP_200_OK)
+async def bulk_hide_goods(
+    payload: BulkVisibilityUpdate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Массовое обновление видимости товаров"""
-    logger.info(f"Получен запрос на обновление видимости товаров: {request.model_dump()}")
-    
+    """Массовое скрытие товаров"""
     try:
-        # Проверяем существование товаров
-        goods_query = select(Goods).filter(Goods.id.in_(request.goods_ids))
-        result = await db.execute(goods_query)
-        existing_goods = result.scalars().all()
+        goods_ids = payload.goods_ids
+        logger.info(f"Запрос на скрытие товаров: {goods_ids}")
         
-        if not existing_goods:
+        if not goods_ids:
             raise HTTPException(
-                status_code=404,
-                detail=f"Товары с ID {request.goods_ids} не найдены"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Список товаров для скрытия пуст"
             )
-        
-        # Обновляем видимость товаров
-        update_stmt = (
+
+        # Обновляем все указанные товары
+        await db.execute(
             update(Goods)
-            .where(Goods.id.in_(request.goods_ids))
-            .values(
-                is_hidden=request.is_hidden,
-                updated_at=func.now()
-            )
+            .where(Goods.id.in_(goods_ids))
+            .values(is_hidden=True, updated_at=datetime.utcnow())
         )
-        await db.execute(update_stmt)
-        
-        # Получаем обновленные товары
-        query = (
-            select(Goods)
-            .options(
-                selectinload(Goods.category),
-                selectinload(Goods.daily_availability),
-                selectinload(Goods.reservations)
-            )
-            .filter(Goods.id.in_(request.goods_ids))
-        )
-        
-        result = await db.execute(query)
-        updated_goods = result.scalars().all()
-        
         await db.commit()
-        logger.info(f"Успешно обновлена видимость для товаров: {request.goods_ids}")
         
-        return updated_goods
+        # Получаем обновленные товары для логирования
+        result = await db.execute(
+            select(Goods.id, Goods.name)
+            .where(Goods.id.in_(goods_ids))
+        )
+        updated_goods = result.all()
+        
+        logger.info(f"Успешно скрыты товары: {[g.name for g in updated_goods]}")
+        
+        return {"message": f"Успешно скрыто товаров: {len(goods_ids)}"}
         
     except ValidationError as e:
-        logger.error(f"Ошибка валидации: {str(e)}")
-        await db.rollback()
-        raise HTTPException(status_code=422, detail=str(e))
+        logger.error(f"Ошибка валидации данных: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
     except Exception as e:
-        logger.error(f"Неожиданная ошибка: {str(e)}")
+        logger.error(f"Ошибка при скрытии товаров: {str(e)}")
         await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при скрытии товаров: {str(e)}"
+        )
+
+@app.put("/goods/bulk/show", status_code=status.HTTP_200_OK)
+async def bulk_show_goods(
+    payload: BulkVisibilityUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Массовое отображение товаров"""
+    try:
+        goods_ids = payload.goods_ids
+        logger.info(f"Запрос на отображение товаров: {goods_ids}")
+        
+        if not goods_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Список товаров для отображения пуст"
+            )
+
+        # Обновляем все указанные товары
+        await db.execute(
+            update(Goods)
+            .where(Goods.id.in_(goods_ids))
+            .values(is_hidden=False, updated_at=datetime.utcnow())
+        )
+        await db.commit()
+        
+        # Получаем обновленные товары для логирования
+        result = await db.execute(
+            select(Goods.id, Goods.name)
+            .where(Goods.id.in_(goods_ids))
+        )
+        updated_goods = result.all()
+        
+        logger.info(f"Успешно показаны товары: {[g.name for g in updated_goods]}")
+        
+        return {"message": f"Успешно показано товаров: {len(goods_ids)}"}
+        
+    except ValidationError as e:
+        logger.error(f"Ошибка валидации данных: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при отображении товаров: {str(e)}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при отображении товаров: {str(e)}"
+        )
 
 # Для тестирования приложения
 if __name__ == "__main__":
