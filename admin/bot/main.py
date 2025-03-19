@@ -598,12 +598,12 @@ async def send_broadcast(broadcast_id: int):
             successful_sends += 1
             
             # Небольшая задержка между отправками, чтобы избежать ограничений Telegram
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
             
         except TelegramForbiddenError:
             # Пользователь заблокировал бота
             blocked_users += 1
-            logger.warning(f"Пользователь {user_id} заблокировал бота")
+            logger.warning(f"Не удалось отправить сообщение пользователю {user['id']}, ошибка: {e}")
             
         except Exception as e:
             failed_sends += 1
@@ -1135,6 +1135,7 @@ async def cancel_reservation_handler(callback: types.CallbackQuery):
                 # Успешная отмена
                 await callback.answer("✅ Бронирование успешно отменено!")
                 
+                await asyncio.sleep(2)
                 # Обновляем список бронирований
                 await cmd_reservations(callback.message)
                 
@@ -1159,6 +1160,53 @@ async def help_command(message: types.Message):
     /reservations - Список бронирований
     /categories - Список категорий
     """)
+
+# Добавляем новый обработчик для уведомлений о подтверждении выкупа
+@app.post("/send-confirmation-notification")
+async def send_confirmation_notification(request: Request):
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        message = data.get("message", "")
+        reservation_id = data.get("reservation_id")
+        
+        if not user_id or not message:
+            logger.error(f"Недостаточно данных для отправки уведомления о подтверждении: user_id={user_id}")
+            return {"status": "error", "message": "Недостаточно данных"}
+        
+        logger.info(f"Отправка уведомления о подтверждении выкупа администратору {user_id}")
+        
+        # Создаем клавиатуру с кнопкой для просмотра подтверждения в админке
+        keyboard = types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    types.InlineKeyboardButton(
+                        text="Посмотреть детали в админке",
+                        web_app=types.WebAppInfo(url=f"{TELEGRAM_WEBAPP_URL.split('?')[0]}#admin/reservations/{reservation_id}")
+                    )
+                ]
+            ]
+        )
+        
+        # Отправляем сообщение администратору
+        await bot.send_message(
+            chat_id=user_id,
+            text=message,
+            reply_markup=keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        
+        logger.info(f"Уведомление успешно отправлено администратору {user_id}")
+        return {"status": "success"}
+    except TelegramForbiddenError:
+        error_msg = f"Администратор {user_id} заблокировал бота"
+        logger.warning(error_msg)
+        return {"status": "error", "message": error_msg}
+    except Exception as e:
+        error_msg = f"Ошибка при отправке уведомления администратору {user_id}: {str(e)}"
+        logger.error(error_msg)
+        return {"status": "error", "message": error_msg}
+
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main()) 

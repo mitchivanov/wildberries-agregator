@@ -1,7 +1,8 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field
 from datetime import datetime
 from pydantic import validator
+from enum import Enum
 
 # Базовые схемы для товаров
 class GoodsBase(BaseModel):
@@ -18,7 +19,10 @@ class GoodsBase(BaseModel):
     end_date: Optional[datetime] = None
     min_daily: int = 1
     max_daily: int = 10
+    total_sales_limit: Optional[int] = None
     category_id: Optional[int] = None
+    note: Optional[str] = None
+    confirmation_requirements: Optional[List[Dict[str, str]]] = None
 
     class Config:
         from_attributes = True
@@ -40,7 +44,9 @@ class GoodsUpdate(BaseModel):
     end_date: Optional[datetime] = None
     min_daily: Optional[int] = None
     max_daily: Optional[int] = None
+    total_sales_limit: Optional[int] = None
     category_id: Optional[int] = None
+    note: Optional[str] = None
 
 # Схемы для категорий
 class CategoryBase(BaseModel):
@@ -59,16 +65,34 @@ class CategoryUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
 
-class CategoryResponse(BaseModel):
+class CategoryNoteBase(BaseModel):
+    text: str
+
+class CategoryNoteCreate(CategoryNoteBase):
+    category_id: int
+
+class CategoryNoteResponse(CategoryNoteBase):
     id: int
-    name: str
-    description: Optional[str] = None
-    is_active: bool = True
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    category_id: int
+    created_at: datetime
     
     class Config:
         from_attributes = True
+
+# Обновление схем для категорий с учетом примечаний
+class CategoryResponse(CategoryBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    notes: List[CategoryNoteResponse] = []
+    
+    class Config:
+        from_attributes = True
+        
+    @validator('notes', pre=True)
+    def set_notes_default(cls, v):
+        # Если notes is None, возвращаем пустой список
+        return v or []
 
 # Схемы для доступности
 class DailyAvailabilityBase(BaseModel):
@@ -89,7 +113,14 @@ class DailyAvailabilityResponse(DailyAvailabilityBase):
     class Config:
         from_attributes = True
 
-# Схемы для резервирования
+# Определение статусов бронирования для схем
+class ReservationStatusEnum(str, Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    CONFIRMED = "confirmed"
+    CANCELED = "canceled"
+
+# Обновляем схемы для резервирования
 class ReservationBase(BaseModel):
     goods_id: int
     quantity: int = 1
@@ -97,19 +128,52 @@ class ReservationBase(BaseModel):
 class ReservationCreate(ReservationBase):
     pass
 
+# Обновляем схему для данных подтверждения
+class ConfirmationFileInfo(BaseModel):
+    filename: str
+    path: str
+    file_type: str  # 'image' или 'video'
+    content_type: str
+    size: int
+
+class ConfirmationItem(BaseModel):
+    type: str  # 'text', 'photo' или 'video'
+    title: str
+    value: str  # Текст или путь к файлу
+    file_info: Optional[ConfirmationFileInfo] = None
+
+# Обновляем схему для отправки данных подтверждения
+class ReservationConfirmationUpdate(BaseModel):
+    confirmation_type: str  # 'order' или 'delivery'
+    confirmation_data: Dict[str, ConfirmationItem]
+
+# Схема для данных подтверждения
+class ConfirmationDataItem(BaseModel):
+    type: str  # "text" или "photo"
+    title: str
+    value: str
+
+class ReservationConfirmationData(BaseModel):
+    confirmation_data: Dict[str, ConfirmationDataItem]
+
 class ReservationResponse(BaseModel):
     id: int
-    goods_id: int
     user_id: int
+    goods_id: int
     quantity: int
     reserved_at: datetime
+    status: str = "reserved"  # Добавляем значение по умолчанию
     goods_name: Optional[str] = None
     goods_image: Optional[str] = None
-    goods_price: Optional[int] = None
-    goods_cashback_percent: Optional[int] = None
+    goods_price: Optional[float] = None
+    goods_cashback_percent: Optional[float] = None
 
     class Config:
         from_attributes = True
+
+# Схема для обновления статуса бронирования
+class ReservationStatusUpdate(BaseModel):
+    status: ReservationStatusEnum
 
 # Расширенные схемы с вложенными объектами
 class GoodsResponse(GoodsBase):

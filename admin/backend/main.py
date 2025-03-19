@@ -1,34 +1,36 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Header
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Header, UploadFile, File, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update, delete, or_
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Union
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 import os
 from datetime import datetime, timedelta
 import random
-from sqlalchemy import func
+from sqlalchemy import func, desc
 import aiohttp
 import asyncio
 import json
 import logging
 from worker import update_goods_activity
-import time
 from aiohttp import ClientSession
 from sqlalchemy.orm import selectinload
 from parser import parse_wildberries_url
-import math
 from logging.handlers import RotatingFileHandler
 from pydantic import ValidationError
+import uuid
+import aiofiles
+from fastapi.staticfiles import StaticFiles
 
 from database import get_db, init_db, close_db, AsyncScopedSession
-from models import Goods, Reservation, DailyAvailability, Category
+from models import Goods, Reservation, DailyAvailability, Category, CategoryNote, ReservationStatus
 from schemas import (
     GoodsCreate, GoodsUpdate, GoodsResponse,ReservationCreate, ReservationResponse,
     DailyAvailabilityResponse, CategoryCreate, CategoryUpdate, CategoryResponse,
-    BulkVisibilityUpdate
+    BulkVisibilityUpdate, CategoryNoteCreate, CategoryNoteResponse,
+    ReservationConfirmationUpdate
 )
 
 # Настраиваем базовую конфигурацию, чтобы логи сразу уходили в stdout (для docker logs)
@@ -87,6 +89,9 @@ _availability_cache_ttl = 10  # Время жизни кэша в секунда
 async def lifespan(app: FastAPI):
     await init_db()
     logger.info("База данных инициализирована")
+    # Создаем директории, если они не существуют
+    os.makedirs("uploads/images", exist_ok=True)
+    os.makedirs("uploads/videos", exist_ok=True)
     yield
     await close_db()
     logger.info("Соединение с базой данных закрыто")
@@ -155,6 +160,15 @@ async def generate_daily_availability(db: AsyncSession, goods_id: int, start_dat
     logger.info(f"Начинаем генерацию доступности для товара {goods_id}")
     logger.info(f"Параметры: start_date={start_date}, end_date={end_date}, min_daily={min_daily}, max_daily={max_daily}")
     
+    # Получаем информацию о товаре
+    goods_query = select(Goods).where(Goods.id == goods_id)
+    goods_result = await db.execute(goods_query)
+    goods = goods_result.scalar_one_or_none()
+    
+    if not goods:
+        logger.error(f"Товар с ID {goods_id} не найден")
+        return
+    
     # Удаляем все существующие записи о доступности для этого товара
     # в будущем (от сегодняшнего дня)
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -183,9 +197,10 @@ async def generate_daily_availability(db: AsyncSession, goods_id: int, start_dat
     start_date = max(start_date, today)
     logger.info(f"Итоговые даты: start_date={start_date}, end_date={end_date}")
     
-    # Создаем новые записи для каждого дня
-    count = 0
+    # Генерируем случайное количество товара для каждого дня в диапазоне
     current_date = start_date
+    count = 0
+    
     while current_date <= end_date:
         # Генерируем случайное количество товара на день
         available_quantity = random.randint(min_daily, max_daily)
@@ -277,7 +292,7 @@ async def read_goods(
         
         query = select(Goods).options(
             selectinload(Goods.daily_availability),
-            selectinload(Goods.category),
+            selectinload(Goods.category).selectinload(Category.notes),
             selectinload(Goods.reservations)  # Добавляем загрузку резерваций
         )
 
@@ -342,87 +357,40 @@ async def search_goods(
 
 @app.get("/goods/{goods_id}", response_model=GoodsResponse, dependencies=[Depends(verify_telegram_user)])
 async def read_goods(goods_id: int, db: AsyncSession = Depends(get_db)):
-    """Получить товар по ID с информацией о доступности и бронированиях"""
-    logger.info(f"Запрос товара с ID: {goods_id}")
-    
-    # Получаем товар
-    goods_query = select(Goods).filter(Goods.id == goods_id)
-    result = await db.execute(goods_query)
-    goods = result.scalars().first()
-    
-    if not goods:
-        logger.warning(f"Товар с ID {goods_id} не найден")
-        raise HTTPException(status_code=404, detail="Товар не найден")
-    
-    # Получаем доступность товара (начиная с сегодняшнего дня)
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    availability_query = select(DailyAvailability).filter(
-        DailyAvailability.goods_id == goods_id,
-        DailyAvailability.date >= today
-    ).order_by(DailyAvailability.date)
-    
-    availability_result = await db.execute(availability_query)
-    availability = availability_result.scalars().all()
-    
-    # Получаем бронирования для этого товара
-    reservations_query = select(Reservation).filter(
-        Reservation.goods_id == goods_id
-    ).order_by(Reservation.reserved_at.desc())
-    
-    reservations_result = await db.execute(reservations_query)
-    reservations = reservations_result.scalars().all()
-    
-    # Получаем информацию о категории
-    category = None
-    if goods.category_id:
-        category_result = await db.execute(select(Category).filter(Category.id == goods.category_id))
-        category = category_result.scalars().first()
-    
-    # Создаем ответ в формате, который ожидает фронтенд
-    goods_dict = {
-        "id": goods.id,
-        "name": goods.name,
-        "price": goods.price,
-        "cashback_percent": goods.cashback_percent,
-        "article": goods.article,
-        "url": goods.url,
-        "image": goods.image,
-        "is_active": goods.is_active,
-        "purchase_guide": goods.purchase_guide,
-        "start_date": goods.start_date,
-        "end_date": goods.end_date,
-        "min_daily": goods.min_daily,
-        "max_daily": goods.max_daily,
-        "created_at": goods.created_at,
-        "updated_at": goods.updated_at,
-        "daily_availability": [
-            {
-                "id": item.id,
-                "goods_id": item.goods_id,
-                "date": item.date,
-                "available_quantity": item.available_quantity
-            }
-            for item in availability
-        ],
-        "reservations": [
-            {
-                "id": item.id,
-                "user_id": item.user_id,
-                "goods_id": item.goods_id,
-                "quantity": item.quantity,
-                "reserved_at": item.reserved_at
-            }
-            for item in reservations
-        ],
-        "category": {
-            "id": category.id,
-            "name": category.name,
-            "description": category.description,
-            "is_active": category.is_active
-        } if category else None
-    }
-    
-    return goods_dict
+    """Получить товар по ID"""
+    try:
+        # Загружаем товар вместе с категорией и примечаниями категории
+        goods_query = select(Goods).options(
+            selectinload(Goods.daily_availability),
+            selectinload(Goods.reservations),
+            selectinload(Goods.category).selectinload(Category.notes)
+        ).where(Goods.id == goods_id)
+        
+        result = await db.execute(goods_query)
+        goods = result.scalars().first()
+        
+        if goods is None:
+            raise HTTPException(status_code=404, detail="Товар не найден")
+        
+        # Обязательно инициализируем поле confirmation_requirements
+        if not hasattr(goods, 'confirmation_requirements') or goods.confirmation_requirements is None:
+            goods.confirmation_requirements = []
+        
+        logger.info(f"Отправляем данные о товаре: {goods.id} - {goods.name}")
+        
+        # Нормализуем ответ для Pydantic модели
+        return {
+            **goods.__dict__,
+            "confirmation_requirements": goods.confirmation_requirements or [],
+            "daily_availability": [da.__dict__ for da in goods.daily_availability] if goods.daily_availability else [],
+            "reservations": [res.__dict__ for res in goods.reservations] if goods.reservations else []
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при получении товара: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при получении товара: {str(e)}"
+        )
 
 @app.put("/goods/{goods_id}", response_model=GoodsResponse)
 async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession = Depends(get_db)):
@@ -470,7 +438,7 @@ async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession 
     reservations_result = await db.execute(reservations_query)
     reservations = reservations_result.scalars().all()
     
-    # Формируем полный ответ как в методе read_goods
+    # Формируем полный ответ
     goods_dict = {
         "id": updated_goods.id,
         "name": updated_goods.name,
@@ -480,11 +448,14 @@ async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession 
         "url": updated_goods.url,
         "image": updated_goods.image,
         "is_active": updated_goods.is_active,
+        "is_hidden": updated_goods.is_hidden,
         "purchase_guide": updated_goods.purchase_guide,
         "start_date": updated_goods.start_date,
         "end_date": updated_goods.end_date,
         "min_daily": updated_goods.min_daily,
         "max_daily": updated_goods.max_daily,
+        "total_sales_limit": updated_goods.total_sales_limit,
+        "note": updated_goods.note,
         "created_at": updated_goods.created_at,
         "updated_at": updated_goods.updated_at,
         "category_id": updated_goods.category_id,
@@ -568,7 +539,7 @@ async def get_catalog(
     current_date: Optional[datetime] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить список доступных товаров на текущую дату"""
+    """Получить список доступных товаров на текущую дату с учетом ограничения общего числа продаж"""
     try:
         if current_date is None:
             current_date = datetime.now()
@@ -579,21 +550,27 @@ async def get_catalog(
         # Добавляем условие is_hidden=False и загрузку связанных данных
         query = select(Goods).options(
             selectinload(Goods.daily_availability),
-            selectinload(Goods.category),
+            selectinload(Goods.category).selectinload(Category.notes),
             selectinload(Goods.reservations)  # Добавляем загрузку резерваций
         ).where(
             Goods.is_active == True,
-            Goods.is_hidden == False,
-            Goods.start_date <= current_date,
-            Goods.end_date >= current_date
+            Goods.is_hidden == False
         )
         
         result = await db.execute(query)
         goods = result.scalars().all()
         
-        # Проверяем наличие доступных товаров на текущую дату
         available_goods = []
         for item in goods:
+            # Проверяем ограничение общего числа продаж
+            if item.total_sales_limit is not None:
+                # Подсчитываем текущее количество резерваций
+                total_reserved = sum(res.quantity for res in item.reservations)
+                
+                # Если уже достигнут лимит продаж, пропускаем товар
+                if total_reserved >= item.total_sales_limit:
+                    continue
+            
             availability_query = select(DailyAvailability).where(
                 DailyAvailability.goods_id == item.id,
                 DailyAvailability.date == current_date.replace(hour=0, minute=0, second=0, microsecond=0),
@@ -667,210 +644,446 @@ async def create_reservation(
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(verify_telegram_user)
 ):
-    """Создать бронирование товара"""
-    # Убедимся, что у нас есть идентификатор пользователя
-    if user_id is None:
-        # В режиме разработки установим фиктивный ID
-        if DEVELOPMENT_MODE:
-            user_id = 1
-        else:
-            raise HTTPException(status_code=403, detail="Не удалось определить пользователя")
-    
-    # Проверяем существование товара
-    result = await db.execute(select(Goods).filter(Goods.id == reservation.goods_id))
-    goods = result.scalars().first()
-    
-    if goods is None:
-        raise HTTPException(status_code=404, detail="Товар не найден")
-    
-    # Проверяем, доступен ли товар на текущую дату
-    current_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    # Исправляем проблему с часовыми поясами
-    start_date = goods.start_date
-    end_date = goods.end_date
-    
-    # Приводим обе даты к одному формату (без часового пояса)
-    if start_date and start_date.tzinfo:
-        start_date = start_date.replace(tzinfo=None)
-    if end_date and end_date.tzinfo:
-        end_date = end_date.replace(tzinfo=None)
-    
-    if start_date and end_date and (start_date > current_date or end_date < current_date):
-        raise HTTPException(status_code=400, detail="Товар недоступен для бронирования на текущую дату")
-    
-    # Проверяем доступность на текущую дату
-    availability_query = select(DailyAvailability).where(
-        DailyAvailability.goods_id == goods.id,
-        DailyAvailability.date == current_date,
-    )
-    availability_result = await db.execute(availability_query)
-    availability = availability_result.scalars().first()
-    
-    if not availability or availability.available_quantity <= 0:
-        raise HTTPException(status_code=400, detail="Товар недоступен для бронирования")
-    
-    # Проверяем, не бронировал ли уже пользователь этот товар сегодня
-    existing_reservation_query = select(Reservation).where(
-        Reservation.goods_id == goods.id,
-        Reservation.user_id == user_id,
-        func.date(Reservation.reserved_at) == current_date.date()
-    )
-    existing_result = await db.execute(existing_reservation_query)
-    if existing_result.scalars().first():
-        raise HTTPException(status_code=400, detail="Вы уже бронировали этот товар сегодня")
-    
-    # Создаем бронирование с гарантированным user_id
-    db_reservation = Reservation(
-        goods_id=goods.id,
-        user_id=user_id,  # Используем ID пользователя из Telegram
-        quantity=reservation.quantity
-    )
-    db.add(db_reservation)
-    
-    # Уменьшаем доступное количество товара
-    availability.available_quantity -= reservation.quantity
-    
-    await db.commit()
-    await db.refresh(db_reservation)
-    
-    # Отправляем уведомление боту после успешного бронирования
-    goods_data = {
-        "id": goods.id,
-        "name": goods.name,
-        "article": goods.article,
-        "price": goods.price,
-        "cashback_percent": goods.cashback_percent,
-        "image": goods.image,
-        "purchase_guide": goods.purchase_guide
-    }
-    
-    # Отправляем уведомление, но не ждем результата
-    # Обернем в try-except для предотвращения ошибок
     try:
-        asyncio.create_task(notify_bot_about_reservation(user_id, goods_data, reservation.quantity))
+        # Ищем товар
+        goods = await db.get(Goods, reservation.goods_id)
+        if not goods:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Товар не найден")
+        
+        # Проверяем, что товар активен и не скрыт
+        if not goods.is_active or goods.is_hidden:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Товар недоступен для бронирования")
+        
+        # Проверяем, что у пользователя нет активных бронирований этого товара
+        stmt = select(Reservation).where(
+            Reservation.goods_id == reservation.goods_id,
+            Reservation.user_id == user_id,
+            Reservation.status.in_([ReservationStatus.PENDING, ReservationStatus.ACTIVE])
+        )
+        
+        # Используем значения "pending", "active" в нижнем регистре
+        existing_reservation = await db.execute(
+            select(Reservation).where(
+                Reservation.goods_id == reservation.goods_id,
+                Reservation.user_id == user_id,
+                Reservation.status.in_(["pending", "active"])
+            )
+        )
+        result = existing_reservation.scalars().first()
+        
+        if result:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="У вас уже есть активное бронирование этого товара"
+            )
+        
+        # Проверяем, что количество не превышает максимальное дневное
+        if reservation.quantity > goods.max_daily:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Максимальное количество для бронирования: {goods.max_daily}"
+            )
+        
+        # Проверяем, что количество не меньше минимального дневного
+        if reservation.quantity < goods.min_daily:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Минимальное количество для бронирования: {goods.min_daily}"
+            )
+        
+        # Проверяем доступность на текущую дату
+        availability_query = select(DailyAvailability).filter(
+            DailyAvailability.goods_id == reservation.goods_id,
+            DailyAvailability.date == datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        )
+        availability_result = await db.execute(availability_query)
+        availability = availability_result.scalars().first()
+        
+        if not availability:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Товар недоступен для бронирования на текущую дату"
+            )
+        
+        if availability.available_quantity < reservation.quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Доступное количество товара: {availability.available_quantity}"
+            )
+        
+        # Создаем запись о бронировании
+        db_reservation = Reservation(
+            goods_id=reservation.goods_id,
+            user_id=user_id,
+            quantity=reservation.quantity,
+            status=ReservationStatus.PENDING  # Используем PENDING из enum
+        )
+        db.add(db_reservation)
+        
+        # Обновляем доступное количество товара
+        availability.available_quantity -= reservation.quantity
+        
+        # Фиксируем изменения в БД
+        await db.commit()
+        await db.refresh(db_reservation)
+        
+        # Формируем ответ
+        response = {
+            "id": db_reservation.id,
+            "user_id": db_reservation.user_id,
+            "goods_id": db_reservation.goods_id,
+            "quantity": db_reservation.quantity,
+            "reserved_at": db_reservation.reserved_at,
+            "status": db_reservation.status.value,
+            "goods_name": goods.name,
+            "goods_image": goods.image,
+            "goods_price": goods.price,
+            "goods_cashback_percent": goods.cashback_percent,
+        }
+        
+        # Асинхронно уведомляем бота о бронировании
+        asyncio.create_task(notify_bot_about_reservation(
+            user_id=user_id, 
+            goods_data={
+                "id": goods.id,
+                "name": goods.name,
+                "price": goods.price,
+                "cashback_percent": goods.cashback_percent,
+                "image": goods.image
+            },
+            quantity=reservation.quantity
+        ))
+        
+        return response
+        
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception as e:
-        logger.error(f"Ошибка при создании задачи для отправки уведомления: {str(e)}")
-    
-    # Успешно возвращаем данные о бронировании
-    return db_reservation
+        await db.rollback()
+        logger.error(f"Ошибка при создании бронирования: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при создании бронирования: {e}"
+        )
 
-@app.get("/user/{user_id}/reservations/", response_model=List[ReservationResponse])
-async def get_user_reservations(
-    user_id: int,
-    db: AsyncSession = Depends(get_db)
+@app.get("/user-reservations/", response_model=List[ReservationResponse])
+async def get_current_user_reservations(
+    status: Optional[str] = None,  # Можно фильтровать по статусу
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(verify_telegram_user)
 ):
-    """Получить список бронирований пользователя"""
-    query = select(Reservation).filter(Reservation.user_id == user_id)
+    """Получить список бронирований текущего пользователя"""
+    if user_id is None:
+        raise HTTPException(status_code=403, detail="Не удалось определить пользователя")
+    
+    # Создаем базовый запрос с полной загрузкой товара
+    query = select(Reservation).options(
+        selectinload(Reservation.goods)
+    ).filter(Reservation.user_id == user_id)
+    
+    # Применяем фильтр по статусу, если указан
+    if status:
+        try:
+            status_enum = ReservationStatus[status.upper()]
+            query = query.filter(Reservation.status == status_enum)
+        except (KeyError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Недопустимый статус: {status}")
+    
+    # Сортировка по дате бронирования (по убыванию)
+    query = query.order_by(desc(Reservation.reserved_at))
+    
     result = await db.execute(query)
     reservations = result.scalars().all()
     
-    # Получаем информацию о товарах для отображения названий и других деталей
-    goods_ids = [item.goods_id for item in reservations]
-    goods_dict = {}
-    
-    if goods_ids:
-        goods_query = select(Goods).filter(Goods.id.in_(goods_ids))
-        goods_result = await db.execute(goods_query)
-        goods_dict = {goods.id: goods for goods in goods_result.scalars().all()}
-    
-    # Формируем ответ с включением данных о товаре
+    # Формируем ответ с полной информацией о товаре
     response_list = []
     for item in reservations:
-        goods = goods_dict.get(item.goods_id)
+        goods = item.goods
+        
         reservation_dict = {
             "id": item.id,
             "user_id": item.user_id,
             "goods_id": item.goods_id,
             "quantity": item.quantity,
             "reserved_at": item.reserved_at,
+            "status": item.status.value if item.status else "active",
+            "confirmation_data": item.confirmation_data if hasattr(item, 'confirmation_data') else None,
             "goods_name": goods.name if goods else None,
             "goods_image": goods.image if goods else None,
             "goods_price": goods.price if goods else None,
-            "goods_cashback_percent": goods.cashback_percent if goods else None
+            "goods_cashback_percent": goods.cashback_percent if goods else None,
+            "goods": {
+                "id": goods.id,
+                "name": goods.name,
+                "article": goods.article,
+                "price": goods.price,
+                "cashback_percent": goods.cashback_percent,
+                "image": goods.image,
+                "purchase_guide": goods.purchase_guide,
+                "confirmation_requirements": goods.confirmation_requirements or []
+            } if goods else None
         }
         response_list.append(reservation_dict)
     
     return response_list
 
-# Эндпоинт для проверки работоспособности API
-@app.get("/health")
-async def health_check():
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
-
-# Эндпоинты для доступности товаров
-@app.get("/availability/", response_model=List[DailyAvailabilityResponse], dependencies=[Depends(verify_telegram_user)])
-async def read_all_availability(
-    skip: int = 0, 
-    limit: int = 500,
-    date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None,
-    goods_id: Optional[int] = None,
-    db: AsyncSession = Depends(get_db)
-):
-    """Получить данные о доступности всех товаров с возможностью фильтрации"""
-    global _last_availability_request_time, _availability_cache
+# Добавляем функцию для обработки загруженных файлов
+async def save_uploaded_file(
+    file: UploadFile,
+    folder: str,
+    user_id: int,
+    file_type: str
+) -> Dict[str, Any]:
+    """
+    Сохраняет загруженный файл в папку uploads/<folder>/<user_id>/ 
+    и возвращает путь к файлу без префикса 'uploads/'
+    """
+    logger.info(f"Сохранение {file_type} файла: {file.filename}, размер: {file.size if hasattr(file, 'size') else 'unknown'}")
     
-    # Проверяем, прошло ли достаточно времени с последнего запроса
-    current_time = time.time()
+    # Проверяем, что файл содержит данные
+    if not file or not file.file:
+        logger.error("Файл пуст или не содержит данных")
+        raise HTTPException(status_code=400, detail="Файл пуст или не содержит данных")
     
-    # Проверяем, можем ли мы использовать кэш
-    if (_availability_cache is not None and 
-        current_time - _last_availability_request_time < _availability_cache_ttl and
-        not any([date_from, date_to, goods_id]) and  # Не используем кэш при фильтрации
-        skip == 0 and limit == 500):  # Не используем кэш при нестандартных параметрах
-        logger.info("Возвращаем кэшированные данные о доступности")
-        return _availability_cache
+    # Создаем директорию для загрузок, если она не существует
+    user_upload_dir = f"uploads/{folder}/{user_id}"
+    os.makedirs(user_upload_dir, exist_ok=True)
     
-    logger.info(f"Запрос списка доступности с параметрами: skip={skip}, limit={limit}, date_from={date_from}, date_to={date_to}, goods_id={goods_id}")
+    # Генерируем уникальное имя файла
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ""
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = f"{user_upload_dir}/{unique_filename}"
     
-    # Обновляем время последнего запроса
-    _last_availability_request_time = current_time
+    # Логируем путь сохранения
+    logger.info(f"Сохраняем файл по пути: {file_path}")
     
-    # Создаем базовый запрос
-    query = select(DailyAvailability)
-    
-    # Применяем фильтры
-    if date_from:
-        query = query.filter(DailyAvailability.date >= date_from)
-    if date_to:
-        query = query.filter(DailyAvailability.date <= date_to)
-    if goods_id:
-        query = query.filter(DailyAvailability.goods_id == goods_id)
-    
-    # Сортировка и пагинация
-    query = query.order_by(DailyAvailability.date.desc()).offset(skip).limit(limit)
-    
-    result = await db.execute(query)
-    availability_list = result.scalars().all()
-    
-    # Получаем информацию о товарах для отображения названий
-    goods_ids = [item.goods_id for item in availability_list]
-    if goods_ids:
-        goods_query = select(Goods).filter(Goods.id.in_(goods_ids))
-        goods_result = await db.execute(goods_query)
-        goods_dict = {goods.id: goods.name for goods in goods_result.scalars().all()}
-    else:
-        goods_dict = {}
-    
-    # Формируем ответ с включением имени товара
-    response_list = []
-    for item in availability_list:
-        availability_dict = {
-            "id": item.id,
-            "goods_id": item.goods_id,
-            "date": item.date,
-            "available_quantity": item.available_quantity,
-            "goods_name": goods_dict.get(item.goods_id, None)  # Добавляем имя товара
+    try:
+        # Читаем и сохраняем содержимое файла
+        contents = await file.read()
+        
+        # Сохраняем файл
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        
+        # Возвращаем информацию о сохраненном файле
+        # Возвращаем путь без префикса 'uploads/' для фронтенда
+        relative_path = f"{folder}/{user_id}/{unique_filename}"
+        
+        return {
+            "filename": unique_filename,
+            "content_type": file.content_type,
+            "path": file_path,  # полный путь к файлу
+            "relative_path": relative_path  # относительный путь для формирования URL
         }
-        response_list.append(availability_dict)
-    
-    # Обновляем кэш, если это стандартный запрос без фильтров
-    if not any([date_from, date_to, goods_id]) and skip == 0 and limit == 500:
-        _availability_cache = response_list
-    
-    return response_list
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении файла: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при сохранении файла: {str(e)}")
 
+# Обновляем эндпоинт подтверждения бронирования
+@app.post("/reservations/{reservation_id}/confirm", status_code=status.HTTP_200_OK)
+async def confirm_reservation(
+    reservation_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(verify_telegram_user)
+):
+    """Подтверждение бронирования пользователем с данными подтверждения и файлами"""
+    # Добавляем подробное логирование
+    logger.info(f"Получен запрос на подтверждение бронирования {reservation_id} от пользователя {user_id}")
+    
+    if user_id is None:
+        raise HTTPException(status_code=403, detail="Не удалось определить пользователя")
+    
+    # Получаем данные формы
+    form_data = await request.form()
+    
+    # Разделяем файлы и текстовые данные
+    files = {}
+    field_data = {}
+    
+    # Более детальное логирование для отладки формы
+    logger.info(f"Получены ключи формы: {list(form_data.keys())}")
+    
+    for key, value in form_data.items():
+        # Добавляем проверку на UploadFile через content_type
+        if hasattr(value, 'filename') and hasattr(value, 'content_type'):
+            files[key] = value
+            logger.info(f"Получен файл: {key}, имя: {value.filename}, тип: {value.content_type}, размер: {value.size if hasattr(value, 'size') else 'неизвестно'}")
+        else:
+            field_data[key] = value
+            # Не логируем содержимое полей, только ключи
+            logger.info(f"Получено поле: {key}")
+
+    # Логируем полученные данные для отладки
+    logger.info(f"Всего получено полей данных: {len(field_data)}")
+    logger.info(f"Всего получено файлов: {len(files)}")
+
+    # Получаем бронирование
+    result = await db.execute(
+        select(Reservation)
+        .where(Reservation.id == reservation_id)
+        .options(selectinload(Reservation.goods))
+    )
+    reservation = result.scalars().first()
+    
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Бронирование не найдено")
+    
+    # Проверяем права пользователя
+    if reservation.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав для подтверждения бронирования")
+    
+    # Проверяем, что бронирование активно
+    if reservation.status != ReservationStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail=f"Бронирование не может быть подтверждено в текущем статусе: {reservation.status.value}")
+    
+    # Обрабатываем данные формы
+    confirmation_data = {}
+    
+    # Группируем данные по идентификаторам полей
+    field_groups = {}
+    for key, value in form_data.items():
+        if not key.startswith('field_'):
+            continue
+            
+        # Извлекаем ID поля и тип (meta, text, file)
+        parts = key.split('_')
+        if len(parts) >= 3:
+            field_id = '_'.join(parts[1:-1])  # Берем все части между field_ и _meta/_text/_file
+            field_type = parts[-1]
+            
+            if field_id not in field_groups:
+                field_groups[field_id] = {}
+            
+            # Сохраняем значение в соответствующую группу
+            field_groups[field_id][field_type] = value
+    
+    # Обрабатываем сгруппированные данные
+    for field_id, group in field_groups.items():
+        meta_key = 'meta'
+        if meta_key not in group:
+            logger.warning(f"Пропускаем поле {field_id} без метаданных")
+            continue
+            
+        try:
+            meta = json.loads(group[meta_key])
+            
+            confirmation_data[field_id] = {
+                'type': meta['type'],
+                'title': meta['title'],
+                'value': '',
+                'file_info': None
+            }
+            
+            # Заполняем текстовое значение
+            if 'text' in group:
+                confirmation_data[field_id]['value'] = group['text']
+                logger.info(f"Добавлено текстовое поле {field_id}: {meta['title']}")
+            
+            # Обрабатываем файл
+            if 'file' in group and hasattr(group['file'], 'filename'):
+                file = group['file']
+                file_type = meta['type']
+                
+                # Сохраняем файл
+                folder = os.path.join('uploads', 'images' if file_type == 'photo' else 'videos')
+                file_info = await save_uploaded_file(
+                    file=file,
+                    folder=folder,
+                    user_id=user_id,
+                    file_type='image' if file_type == 'photo' else 'video'
+                )
+                
+                confirmation_data[field_id]['value'] = file_info['relative_path']
+                confirmation_data[field_id]['file_info'] = file_info
+                logger.info(f"Сохранен файл для поля {field_id}: {file_info['relative_path']}")
+        except Exception as e:
+            logger.error(f"Ошибка обработки поля {field_id}: {str(e)}")
+            # Продолжаем с другими полями
+    
+    logger.info(f"Обработано полей подтверждения: {len(confirmation_data)}")
+    
+    # Сохраняем данные подтверждения и обновляем статус
+    reservation.confirmation_data = confirmation_data
+    reservation.status = ReservationStatus.CONFIRMED
+    
+    await db.commit()
+    await db.refresh(reservation)
+    
+    # Добавляем уведомление администраторов о подтверждении бронирования
+    if hasattr(reservation, 'goods') and reservation.goods:
+        goods_data = {
+            "id": reservation.goods.id,
+            "name": reservation.goods.name,
+            "article": reservation.goods.article,
+            "price": reservation.goods.price,
+            "cashback_percent": reservation.goods.cashback_percent,
+            "image": reservation.goods.image
+        }
+        
+        # Асинхронно отправляем уведомление администраторам
+        asyncio.create_task(notify_admin_about_confirmation(
+            user_id=user_id,
+            goods_data=goods_data,
+            reservation_id=reservation_id,
+            confirmation_data=confirmation_data
+        ))
+    
+    return {"status": "success", "message": "Бронирование подтверждено с данными"}
+
+# Добавляем эндпоинт для отмены бронирования с обновлением статуса
+@app.post("/reservations/{reservation_id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_reservation_with_status(
+    reservation_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(verify_telegram_user)
+):
+    """Отмена бронирования с обновлением статуса"""
+    if user_id is None:
+        raise HTTPException(status_code=403, detail="Не удалось определить пользователя")
+    
+    # Получаем бронирование
+    result = await db.execute(
+        select(Reservation)
+        .where(Reservation.id == reservation_id)
+        .options(selectinload(Reservation.goods))
+    )
+    reservation = result.scalars().first()
+    
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Бронирование не найдено")
+    
+    # Проверяем права пользователя
+    if reservation.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав для отмены бронирования")
+    
+    # Проверяем, можно ли отменить бронирование
+    if reservation.status != ReservationStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail=f"Бронирование не может быть отменено в текущем статусе: {reservation.status.value}")
+    
+    # Обновляем статус бронирования на CANCELED
+    reservation.status = ReservationStatus.CANCELED
+    
+    # Находим соответствующую запись о доступности
+    availability_result = await db.execute(
+        select(DailyAvailability)
+        .where(
+            DailyAvailability.goods_id == reservation.goods_id,
+            DailyAvailability.date == reservation.reserved_at.date()
+        )
+    )
+    daily_availability = availability_result.scalars().first()
+    
+    if daily_availability:
+        # Возвращаем товар в доступное количество
+        daily_availability.available_quantity += reservation.quantity
+    
+    await db.commit()
+    
+    return {"status": "success", "message": "Бронирование отменено"}
+
+# Обновляем эндпоинт получения всех бронирований с фильтрацией по статусу
 @app.get("/reservations/", dependencies=[Depends(verify_telegram_user)])
 async def read_all_reservations(
     skip: int = 0, 
@@ -879,10 +1092,11 @@ async def read_all_reservations(
     goods_id: Optional[int] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    status: Optional[str] = None,  # Фильтр по статусу
     db: AsyncSession = Depends(get_db)
 ):
     """Получить список всех бронирований с возможностью фильтрации"""
-    logger.info(f"Запрос списка бронирований с параметрами: skip={skip}, limit={limit}, user_id={user_id}, goods_id={goods_id}, date_from={date_from}, date_to={date_to}")
+    logger.info(f"Запрос списка бронирований с параметрами: skip={skip}, limit={limit}, user_id={user_id}, goods_id={goods_id}, date_from={date_from}, date_to={date_to}, status={status}")
     
     # Создаем базовый запрос
     query = select(Reservation)
@@ -896,6 +1110,14 @@ async def read_all_reservations(
         query = query.filter(Reservation.reserved_at >= date_from)
     if date_to:
         query = query.filter(Reservation.reserved_at <= date_to)
+    if status:
+        # Проверяем корректность статуса
+        try:
+            status_enum = ReservationStatus[status.upper()]
+            query = query.filter(Reservation.status == status_enum)
+        except (KeyError, ValueError):
+            # Если статус не является допустимым значением Enum, игнорируем этот фильтр
+            logger.warning(f"Недопустимое значение статуса: {status}")
     
     # Сортировка и пагинация
     query = query.order_by(Reservation.reserved_at.desc()).offset(skip).limit(limit)
@@ -908,23 +1130,51 @@ async def read_all_reservations(
     if goods_ids:
         goods_query = select(Goods).filter(Goods.id.in_(goods_ids))
         goods_result = await db.execute(goods_query)
-        goods_dict = {goods.id: goods.name for goods in goods_result.scalars().all()}
+        goods_dict = {goods.id: goods for goods in goods_result.scalars().all()}
     else:
         goods_dict = {}
     
-    # Формируем ответ с включением имени товара
+    # Формируем ответ с включением имени товара и статуса
     response_list = []
     for item in reservations_list:
+        goods = goods_dict.get(item.goods_id)
+        
+        # Проверяем и нормализуем данные подтверждения
+        confirmation_data = {}
+        if item.confirmation_data:
+            # Обрабатываем пути к файлам в данных подтверждения
+            for field_id, field_data in item.confirmation_data.items():
+                processed_field = field_data.copy()
+                if field_data.get('type') in ['photo', 'video'] and field_data.get('value'):
+                    # Получаем чистый путь к файлу без 'uploads/' в начале
+                    path = field_data['value']
+                    # Удаляем все начальные слеши
+                    while path.startswith('/'):
+                        path = path[1:]
+                    # Удаляем префикс 'uploads/' если он есть
+                    if path.startswith('uploads/'):
+                        path = path[8:]
+                        
+                    processed_field['value'] = path
+                    logger.info(f"Нормализованный путь к файлу для поля {field_id}: {processed_field['value']}")
+                confirmation_data[field_id] = processed_field
+        
         reservation_dict = {
             "id": item.id,
             "user_id": item.user_id,
             "goods_id": item.goods_id,
             "quantity": item.quantity,
             "reserved_at": item.reserved_at,
-            "goods_name": goods_dict.get(item.goods_id, None)  # Добавляем имя товара
+            "status": item.status.value if item.status else "active",
+            "confirmation_data": confirmation_data,
+            "goods_name": goods.name if goods else None,
+            "goods_image": goods.image if goods else None,
+            "goods_price": goods.price if goods else None,
+            "goods_cashback_percent": goods.cashback_percent if goods else None
         }
         response_list.append(reservation_dict)
     
+    logger.info(f"Возвращаем {len(response_list)} бронирований")
     return response_list
 
 @app.delete("/reservations/{reservation_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1043,12 +1293,34 @@ async def bot_cancel_reservation(reservation_id: int, user_id: int, db: AsyncSes
 # Эндпоинты для категорий
 @app.post("/categories/", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
 async def create_category(category: CategoryCreate, db: AsyncSession = Depends(get_db)):
-    """Создать новую категорию"""
-    db_category = Category(**category.dict())
-    db.add(db_category)
-    await db.commit()
-    await db.refresh(db_category)
-    return db_category
+    """Создать новую категорию товаров"""
+    try:
+        db_category = Category(
+            name=category.name,
+            description=category.description,
+            is_active=category.is_active
+        )
+        db.add(db_category)
+        await db.commit()
+        await db.refresh(db_category)
+        
+        # Создаем объект ответа вручную, чтобы избежать проблем с lazy loading
+        return {
+            "id": db_category.id,
+            "name": db_category.name,
+            "description": db_category.description,
+            "is_active": db_category.is_active,
+            "created_at": db_category.created_at,
+            "updated_at": db_category.updated_at,
+            "notes": []  # Новая категория не имеет примечаний
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Ошибка при создании категории: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при создании категории: {str(e)}"
+        )
 
 @app.get("/categories/", response_model=List[CategoryResponse])
 async def read_all_categories(
@@ -1057,28 +1329,101 @@ async def read_all_categories(
     is_active: Optional[bool] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить список всех категорий с пагинацией и фильтрацией"""
-    query = select(Category)
-    
-    if is_active is not None:
-        query = query.filter(Category.is_active == is_active)
-    
-    query = query.offset(skip).limit(limit)
-    result = await db.execute(query)
-    categories = result.scalars().all()
-    
-    return categories
+    """Получить список всех категорий товаров"""
+    try:
+        # Создаем базовый запрос
+        query = select(Category)
+        
+        # Применяем фильтр по активности, если указан
+        if is_active is not None:
+            query = query.filter(Category.is_active == is_active)
+        
+        # Добавляем пагинацию
+        query = query.offset(skip).limit(limit)
+        
+        # Выполняем запрос
+        result = await db.execute(query)
+        categories = result.scalars().all()
+        
+        # Формируем список категорий с примечаниями
+        response_list = []
+        for category in categories:
+            # Загружаем примечания для текущей категории
+            notes_query = select(CategoryNote).filter(CategoryNote.category_id == category.id)
+            notes_result = await db.execute(notes_query)
+            notes = notes_result.scalars().all()
+            
+            # Формируем объект категории с примечаниями
+            category_dict = {
+                "id": category.id,
+                "name": category.name,
+                "description": category.description,
+                "is_active": category.is_active,
+                "created_at": category.created_at,
+                "updated_at": category.updated_at,
+                "notes": [
+                    {
+                        "id": note.id,
+                        "category_id": note.category_id,
+                        "text": note.text,
+                        "created_at": note.created_at
+                    } 
+                    for note in notes
+                ]
+            }
+            response_list.append(category_dict)
+        
+        return response_list
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка категорий: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при получении списка категорий: {str(e)}"
+        )
 
 @app.get("/categories/{category_id}", response_model=CategoryResponse)
 async def read_category(category_id: int, db: AsyncSession = Depends(get_db)):
     """Получить категорию по ID"""
-    result = await db.execute(select(Category).filter(Category.id == category_id))
-    category = result.scalars().first()
-    
-    if category is None:
-        raise HTTPException(status_code=404, detail="Категория не найдена")
-    
-    return category
+    try:
+        # Получаем категорию
+        query = select(Category).filter(Category.id == category_id)
+        result = await db.execute(query)
+        category = result.scalars().first()
+        
+        if not category:
+            raise HTTPException(status_code=404, detail="Категория не найдена")
+        
+        # Получаем примечания для категории
+        notes_query = select(CategoryNote).filter(CategoryNote.category_id == category_id)
+        notes_result = await db.execute(notes_query)
+        notes = notes_result.scalars().all()
+        
+        # Формируем ответ
+        return {
+            "id": category.id,
+            "name": category.name,
+            "description": category.description,
+            "is_active": category.is_active,
+            "created_at": category.created_at,
+            "updated_at": category.updated_at,
+            "notes": [
+                {
+                    "id": note.id,
+                    "category_id": note.category_id,
+                    "text": note.text,
+                    "created_at": note.created_at
+                } 
+                for note in notes
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при получении категории: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при получении категории: {str(e)}"
+        )
 
 @app.put("/categories/{category_id}", response_model=CategoryResponse)
 async def update_category(
@@ -1087,26 +1432,56 @@ async def update_category(
     db: AsyncSession = Depends(get_db)
 ):
     """Обновить категорию по ID"""
-    result = await db.execute(select(Category).filter(Category.id == category_id))
-    category = result.scalars().first()
-    
-    if category is None:
-        raise HTTPException(status_code=404, detail="Категория не найдена")
-    
-    update_data = {k: v for k, v in category_data.dict().items() if v is not None}
-    
-    if update_data:
-        await db.execute(
-            update(Category)
-            .where(Category.id == category_id)
-            .values(**update_data)
-        )
+    try:
+        query = select(Category).filter(Category.id == category_id)
+        result = await db.execute(query)
+        db_category = result.scalars().first()
+        
+        if not db_category:
+            raise HTTPException(status_code=404, detail="Категория не найдена")
+        
+        # Обновляем только предоставленные поля
+        update_data = category_data.dict(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(db_category, key, value)
+        
         await db.commit()
-    
-    result = await db.execute(select(Category).filter(Category.id == category_id))
-    updated_category = result.scalars().first()
-    
-    return updated_category
+        await db.refresh(db_category)
+        
+        # Получаем примечания для обновленной категории
+        notes_query = select(CategoryNote).filter(CategoryNote.category_id == category_id)
+        notes_result = await db.execute(notes_query)
+        notes = notes_result.scalars().all()
+        
+        # Создаем словарь с данными категории и примечаниями
+        category_dict = {
+            "id": db_category.id,
+            "name": db_category.name,
+            "description": db_category.description,
+            "is_active": db_category.is_active,
+            "created_at": db_category.created_at,
+            "updated_at": db_category.updated_at,
+            "notes": [
+                {
+                    "id": note.id,
+                    "category_id": note.category_id,
+                    "text": note.text,
+                    "created_at": note.created_at
+                } 
+                for note in notes
+            ]
+        }
+        
+        return category_dict
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Ошибка при обновлении категории: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при обновлении категории: {str(e)}"
+        )
 
 @app.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
@@ -1202,6 +1577,7 @@ async def bulk_show_goods(
             .where(Goods.id.in_(goods_ids))
             .values(is_hidden=False, updated_at=datetime.utcnow())
         )
+        
         await db.commit()
         
         # Получаем обновленные товары для логирования
@@ -1229,7 +1605,441 @@ async def bulk_show_goods(
             detail=f"Ошибка при отображении товаров: {str(e)}"
         )
 
+# Эндпоинты для примечаний категорий
+@app.post("/category-notes/", response_model=CategoryNoteResponse, status_code=status.HTTP_201_CREATED)
+async def create_category_note(note: CategoryNoteCreate, db: AsyncSession = Depends(get_db)):
+    """Создать новое примечание для категории"""
+    # Проверяем существование категории
+    result = await db.execute(select(Category).filter(Category.id == note.category_id))
+    category = result.scalars().first()
+    
+    if category is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    
+    db_note = CategoryNote(**note.dict())
+    db.add(db_note)
+    await db.commit()
+    await db.refresh(db_note)
+    return db_note
+
+@app.get("/category-notes/{category_id}", response_model=List[CategoryNoteResponse])
+async def read_category_notes(category_id: int, db: AsyncSession = Depends(get_db)):
+    """Получить все примечания для указанной категории"""
+    # Проверяем существование категории
+    result = await db.execute(select(Category).filter(Category.id == category_id))
+    category = result.scalars().first()
+    
+    if category is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    
+    # Получаем примечания
+    notes_query = select(CategoryNote).filter(CategoryNote.category_id == category_id)
+    notes_result = await db.execute(notes_query)
+    notes = notes_result.scalars().all()
+    
+    return notes
+
+@app.delete("/category-notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_category_note(note_id: int, db: AsyncSession = Depends(get_db)):
+    """Удалить примечание для категории"""
+    result = await db.execute(select(CategoryNote).filter(CategoryNote.id == note_id))
+    note = result.scalars().first()
+    
+    if note is None:
+        raise HTTPException(status_code=404, detail="Примечание не найдено")
+    
+    await db.delete(note)
+    await db.commit()
+    return None
+
+# Монтируем папку uploads как статические файлы 
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# Создаем директории для статических файлов, если их нет
+os.makedirs("uploads/images", exist_ok=True)
+os.makedirs("uploads/videos", exist_ok=True)
+
+# Монтируем статические директории
+app.mount("/api/static", StaticFiles(directory="uploads"), name="static")
+
 # Для тестирования приложения
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+async def notify_admin_about_confirmation(user_id: int, goods_data: Dict, reservation_id: int, confirmation_data: Dict):
+    """Отправляет уведомление администраторам о подтверждении бронирования"""
+    try:
+        # Формируем сообщение с данными подтверждения
+        confirmation_details = []
+        for field_id, data in confirmation_data.items():
+            if data['type'] == 'text':
+                confirmation_details.append(f"{data['title']}: {data['value']}")
+            else:
+                confirmation_details.append(f"{data['title']}: [Файл загружен]")
+        
+        message = f"🔔 Пользователь {user_id} подтвердил выкуп товара!\n\n"
+        message += f"📦 Товар: {goods_data['name']}\n"
+        message += f"💲 Цена: {goods_data['price']} ₽\n"
+        message += f"🔢 Артикул: {goods_data['article']}\n\n"
+        message += "📋 Данные подтверждения:\n"
+        message += "\n".join(confirmation_details)
+        
+        # ID супер-администраторов из переменной окружения
+        super_admin_ids = os.getenv("SUPER_ADMIN_IDS", "").split(",")
+        
+        # Отправляем уведомление каждому супер-администратору
+        async with aiohttp.ClientSession() as session:
+            for admin_id in super_admin_ids:
+                if admin_id:
+                    admin_id = int(admin_id)
+                    endpoint = f"{BOT_API_URL}/send-confirmation-notification"
+                    async with session.post(
+                        endpoint,
+                        json={
+                            "user_id": admin_id,
+                            "message": message,
+                            "reservation_id": reservation_id
+                        },
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as response:
+                        if response.status != 200:
+                            logger.warning(f"Ошибка при отправке уведомления администратору {admin_id}: {response.status}")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке уведомления администраторам: {str(e)}")
+
+@app.get("/availability/", response_model=List[Dict[str, Any]])
+async def get_all_availability(
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Получение всех данных о доступности товаров с названиями и артикулами"""
+    
+    query = select(
+        DailyAvailability.id,
+        DailyAvailability.goods_id,
+        DailyAvailability.date,
+        DailyAvailability.available_quantity,
+        Goods.name.label("goods_name"),
+        Goods.article.label("goods_article"),
+        Goods.image.label("goods_image"),
+        Goods.price.label("goods_price")
+    ).join(
+        Goods, DailyAvailability.goods_id == Goods.id
+    )
+    
+    # Добавляем фильтры по дате, если они указаны
+    if date_from:
+        query = query.filter(DailyAvailability.date >= date_from)
+    if date_to:
+        query = query.filter(DailyAvailability.date <= date_to)
+    
+    # Сортируем по goods_id и дате
+    query = query.order_by(DailyAvailability.goods_id, DailyAvailability.date)
+    
+    try:
+        result = await db.execute(query)
+        availability_data = result.mappings().all()
+        
+        # Преобразуем данные для удобства использования на фронтенде
+        return [dict(item) for item in availability_data]
+    except Exception as e:
+        logger.error(f"Ошибка при получении данных о доступности: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении данных о доступности: {str(e)}"
+        )
+
+@app.post("/reservations/{reservation_id}/confirm-order", status_code=status.HTTP_200_OK)
+async def confirm_reservation_order(
+    reservation_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(verify_telegram_user)
+):
+    """Подтверждение заказа (перевод из pending в active)"""
+    try:
+        # Получаем бронирование по ID
+        query = select(Reservation).filter(Reservation.id == reservation_id)
+        result = await db.execute(query)
+        reservation = result.scalars().first()
+        
+        if not reservation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Бронирование с ID {reservation_id} не найдено"
+            )
+        
+        # Проверяем, что бронирование принадлежит пользователю
+        if reservation.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="У вас нет прав на подтверждение этого бронирования"
+            )
+        
+        # Проверяем, что бронирование находится в статусе PENDING
+        if reservation.status != ReservationStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Нельзя подтвердить заказ для бронирования в статусе {reservation.status.value}"
+            )
+        
+        # Получаем данные товара
+        goods_query = select(Goods).filter(Goods.id == reservation.goods_id)
+        goods_result = await db.execute(goods_query)
+        goods = goods_result.scalars().first()
+        
+        if not goods:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Товар с ID {reservation.goods_id} не найден"
+            )
+        
+        # Обрабатываем форму данных
+        form_data = await request.form()
+        
+        # Инициализируем словарь для данных подтверждения
+        confirmation_data = {}
+        
+        # Обрабатываем метаданные полей
+        for key in form_data.keys():
+            if key.startswith('field_') and key.endswith('_meta'):
+                field_id = key.split('_')[1]  # Извлекаем ID поля
+                try:
+                    meta = json.loads(form_data[key])
+                    field_type = meta.get('type', 'text')
+                    field_title = meta.get('title', 'Без названия')
+                    
+                    # Инициализируем запись для поля
+                    confirmation_data[field_id] = {
+                        'type': field_type,
+                        'title': field_title,
+                        'value': ''
+                    }
+                    
+                    # Получаем значение поля в зависимости от его типа
+                    if field_type == 'text':
+                        text_key = f'field_{field_id}_text'
+                        if text_key in form_data:
+                            confirmation_data[field_id]['value'] = form_data[text_key]
+                    elif field_type in ['photo', 'video']:
+                        file_key = f'field_{field_id}_file'
+                        if file_key in form_data:
+                            # Сохраняем файл на сервере
+                            file = form_data[file_key]
+                            file_type = 'image' if field_type == 'photo' else 'video'
+                            
+                            # Проверяем размер файла
+                            max_size_mb = 5 if field_type == 'photo' else 50
+                            max_size_bytes = max_size_mb * 1024 * 1024
+                            
+                            if not hasattr(file, 'file'):
+                                raise HTTPException(
+                                    status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail=f"Не удалось обработать файл для поля {field_title}"
+                                )
+                            
+                            if file.size > max_size_bytes:
+                                raise HTTPException(
+                                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                    detail=f"Файл слишком большой. Максимальный размер: {max_size_mb} МБ"
+                                )
+                            
+                            # Сохраняем файл
+                            file_info = await save_uploaded_file(file, file_type + 's', user_id, file_type)
+                            confirmation_data[field_id]['value'] = file_info['relative_path']
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке поля {key}: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Ошибка при обработке поля: {str(e)}"
+                    )
+        
+        # Проверяем, что все необходимые поля заполнены
+        for field_id, field_data in confirmation_data.items():
+            if not field_data['value']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Поле '{field_data['title']}' обязательно для заполнения"
+                )
+        
+        # Обновляем бронирование
+        reservation.status = ReservationStatus.ACTIVE
+        reservation.confirmation_data = confirmation_data
+        
+        await db.commit()
+        
+        # Асинхронно уведомляем администратора о подтверждении заказа
+        goods_data = {
+            "id": goods.id,
+            "name": goods.name,
+            "price": goods.price,
+            "cashback_percent": goods.cashback_percent,
+            "image": goods.image
+        }
+        asyncio.create_task(notify_admin_about_confirmation(
+            user_id, goods_data, reservation_id, confirmation_data
+        ))
+        
+        return {"status": "success", "message": "Заказ успешно подтвержден"}
+    
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при подтверждении заказа: {e}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при подтверждении заказа: {e}"
+        )
+
+@app.post("/reservations/{reservation_id}/confirm-delivery", status_code=status.HTTP_200_OK)
+async def confirm_reservation_delivery(
+    reservation_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(verify_telegram_user)
+):
+    """Подтверждение получения товара (перевод из active в confirmed)"""
+    try:
+        # Получаем бронирование по ID
+        query = select(Reservation).filter(Reservation.id == reservation_id)
+        result = await db.execute(query)
+        reservation = result.scalars().first()
+        
+        if not reservation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Бронирование с ID {reservation_id} не найдено"
+            )
+        
+        # Проверяем, что бронирование принадлежит пользователю
+        if reservation.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="У вас нет прав на подтверждение этого бронирования"
+            )
+        
+        # Проверяем, что бронирование находится в статусе ACTIVE
+        if reservation.status != ReservationStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Нельзя подтвердить получение для бронирования в статусе {reservation.status.value}"
+            )
+        
+        # Получаем данные товара
+        goods_query = select(Goods).filter(Goods.id == reservation.goods_id)
+        goods_result = await db.execute(goods_query)
+        goods = goods_result.scalars().first()
+        
+        if not goods:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Товар с ID {reservation.goods_id} не найден"
+            )
+        
+        # Обрабатываем форму данных
+        form_data = await request.form()
+        
+        # Инициализируем словарь для данных подтверждения получения
+        delivery_confirmation_data = {}
+        
+        # Обрабатываем метаданные полей
+        for key in form_data.keys():
+            if key.startswith('field_') and key.endswith('_meta'):
+                field_id = key.split('_')[1]  # Извлекаем ID поля
+                try:
+                    meta = json.loads(form_data[key])
+                    field_type = meta.get('type', 'text')
+                    field_title = meta.get('title', 'Без названия')
+                    
+                    # Инициализируем запись для поля
+                    delivery_confirmation_data[field_id] = {
+                        'type': field_type,
+                        'title': field_title,
+                        'value': ''
+                    }
+                    
+                    # Получаем значение поля в зависимости от его типа
+                    if field_type == 'text':
+                        text_key = f'field_{field_id}_text'
+                        if text_key in form_data:
+                            delivery_confirmation_data[field_id]['value'] = form_data[text_key]
+                    elif field_type in ['photo', 'video']:
+                        file_key = f'field_{field_id}_file'
+                        if file_key in form_data:
+                            # Сохраняем файл на сервере
+                            file = form_data[file_key]
+                            file_type = 'image' if field_type == 'photo' else 'video'
+                            
+                            # Проверяем размер файла
+                            max_size_mb = 5 if field_type == 'photo' else 50
+                            max_size_bytes = max_size_mb * 1024 * 1024
+                            
+                            if not hasattr(file, 'file'):
+                                raise HTTPException(
+                                    status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail=f"Не удалось обработать файл для поля {field_title}"
+                                )
+                            
+                            if file.size > max_size_bytes:
+                                raise HTTPException(
+                                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                    detail=f"Файл слишком большой. Максимальный размер: {max_size_mb} МБ"
+                                )
+                            
+                            # Сохраняем файл
+                            file_info = await save_uploaded_file(file, file_type + 's', user_id, file_type)
+                            delivery_confirmation_data[field_id]['value'] = file_info['relative_path']
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке поля {key}: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Ошибка при обработке поля: {str(e)}"
+                    )
+        
+        # Проверяем, что все необходимые поля заполнены
+        for field_id, field_data in delivery_confirmation_data.items():
+            if not field_data['value']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Поле '{field_data['title']}' обязательно для заполнения"
+                )
+        
+        # Объединяем данные подтверждения заказа и получения
+        original_confirmation = reservation.confirmation_data or {}
+        for key, value in delivery_confirmation_data.items():
+            original_confirmation[f"delivery_{key}"] = value
+        
+        # Обновляем бронирование
+        reservation.status = ReservationStatus.CONFIRMED
+        reservation.confirmation_data = original_confirmation
+        
+        await db.commit()
+        
+        # Асинхронно уведомляем администратора о подтверждении получения
+        goods_data = {
+            "id": goods.id,
+            "name": goods.name,
+            "price": goods.price,
+            "cashback_percent": goods.cashback_percent,
+            "image": goods.image
+        }
+        asyncio.create_task(notify_admin_about_delivery_confirmation(
+            user_id, goods_data, reservation_id, delivery_confirmation_data
+        ))
+        
+        return {"status": "success", "message": "Получение товара успешно подтверждено"}
+    
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при подтверждении получения: {e}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при подтверждении получения: {e}"
+        )

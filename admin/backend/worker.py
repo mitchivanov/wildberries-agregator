@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from sqlalchemy import select, update
+from sqlalchemy.orm import selectinload
 from database import AsyncScopedSession, init_db, close_db
 from models import Goods
 
@@ -18,7 +19,7 @@ MOSCOW_TZ = ZoneInfo('Europe/Moscow')
 
 async def update_goods_activity():
     """
-    Обновляет статус активности товаров на основе дат начала и окончания
+    Проверяет и обновляет статус активности товаров на основе дат и ограничения продаж
     """
     try:
         logger.info("Обновление статуса активности товаров...")
@@ -26,24 +27,29 @@ async def update_goods_activity():
             # Получаем текущее время в Москве
             current_time = datetime.now(MOSCOW_TZ)
             
-            # Получаем все товары
-            query = select(Goods)
+            # Загружаем все товары с их резервациями
+            query = select(Goods).options(selectinload(Goods.reservations))
             result = await session.execute(query)
-            goods_list = result.scalars().all()
+            all_goods = result.scalars().all()
             
             updated_count = 0
             
-            for goods in goods_list:
-                # Определяем, должен ли товар быть активным
+            for goods in all_goods:
                 should_be_active = True
                 
-                # Проверяем start_date если она задана
+                # Проверяем даты начала и окончания
                 if goods.start_date and goods.start_date > current_time:
                     should_be_active = False
                 
-                # Проверяем end_date если она задана
                 if goods.end_date and goods.end_date < current_time:
                     should_be_active = False
+                    
+                # Проверяем ограничение общего числа продаж
+                if goods.total_sales_limit is not None:
+                    total_reserved = sum(res.quantity for res in goods.reservations)
+                    if total_reserved >= goods.total_sales_limit:
+                        should_be_active = False
+                        logger.info(f"Товар {goods.id} неактивен: достигнут лимит продаж {goods.total_sales_limit}")
                 
                 # Обновляем статус, если он отличается от текущего
                 if goods.is_active != should_be_active:

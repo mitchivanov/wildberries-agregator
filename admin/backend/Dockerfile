@@ -8,13 +8,20 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt psycopg2-binary
+RUN pip install --no-cache-dir -r requirements.txt psycopg2-binary python-multipart pillow
 
-# Устанавливаем postgresql-client для pg_isready
-RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
+# Устанавливаем postgresql-client и другие необходимые инструменты
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    ffmpeg \
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Создаем директорию для логов, даем права
 RUN mkdir -p /app/logs && chmod 777 /app/logs
+
+# Создаем директорию для загруженных файлов
+RUN mkdir -p /app/uploads/images /app/uploads/videos && chmod -R 777 /app/uploads
 
 # Копируем все Python файлы
 COPY *.py ./
@@ -30,7 +37,9 @@ COPY alembic/versions/add_categories_table.py alembic/versions/
 COPY run_migrations.py ./
 
 # Копируем файлы для прямой миграции
-COPY direct_migration.py ./
+COPY category_notes_migration.py ./
+COPY goods_notes_migration.py ./
+COPY sales_limit_migration.py ./
 
 # Копируем и фиксим entrypoint
 COPY entrypoint.sh ./

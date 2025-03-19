@@ -8,11 +8,23 @@ const GoodsForm = ({ editMode = false }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDarkMode, webApp } = useTelegram();
-  const { getGoodsById, createGoods, updateGoods, getCategories, parseWildberriesUrl } = useApi();
+  const { getGoodsById, createGoods, updateGoods, getCategories, parseWildberriesUrl, getCategoryNotes, createCategoryNote, createCategory } = useApi();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [categoryNotes, setCategoryNotes] = useState([]);
+  const [isAddingNote, setIsAddingNote] = useState(false);
+  const [newNote, setNewNote] = useState('');
+  
+  // Добавляем состояния для модального окна создания категории
+  const [showCreateCategoryModal, setShowCreateCategoryModal] = useState(false);
+  const [newCategoryForm, setNewCategoryForm] = useState({
+    name: '',
+    description: '',
+    is_active: true
+  });
+  const [creatingCategory, setCreatingCategory] = useState(false);
 
   // Состояние формы
   const [form, setForm] = useState({
@@ -27,7 +39,10 @@ const GoodsForm = ({ editMode = false }) => {
     end_date: '',
     min_daily: 1,
     max_daily: 10,
-    category_id: ''
+    total_sales_limit: '',
+    category_id: '',
+    note: '',
+    confirmation_requirements: []
   });
 
   // Состояние ошибок валидации
@@ -44,12 +59,22 @@ const GoodsForm = ({ editMode = false }) => {
   // Загрузка списка категорий
   const loadCategories = async () => {
     try {
-      const data = await getCategories();
-      if (data) {
-        setCategories(data);
+      const categoriesData = await getCategories();
+      console.log("Загружены категории:", categoriesData);
+      
+      if (Array.isArray(categoriesData)) {
+        // Фильтруем только активные категории
+        const activeCategories = categoriesData.filter(cat => cat.is_active);
+        setCategories(activeCategories);
+      } else {
+        console.error("Получены некорректные данные категорий:", categoriesData);
+        setCategories([]);
       }
-    } catch (err) {
-      toast.error(`Ошибка при загрузке категорий: ${err.message}`);
+    } catch (error) {
+      console.error("Ошибка при загрузке категорий:", error);
+      setCategories([]);
+      // Показываем уведомление об ошибке
+      toast.error("Не удалось загрузить список категорий");
     }
   };
 
@@ -64,7 +89,9 @@ const GoodsForm = ({ editMode = false }) => {
           ...data,
           start_date: data.start_date ? formatDateForInput(data.start_date) : '',
           end_date: data.end_date ? formatDateForInput(data.end_date) : '',
-          category_id: data.category?.id || ''
+          category_id: data.category?.id || '',
+          note: data.note || '',
+          confirmation_requirements: data.confirmation_requirements || []
         };
         setForm(formattedData);
       }
@@ -81,6 +108,27 @@ const GoodsForm = ({ editMode = false }) => {
     const date = new Date(isoDate);
     return date.toISOString().split('T')[0];
   };
+
+  // Загрузка примечаний для выбранной категории
+  useEffect(() => {
+    const loadCategoryNotes = async () => {
+      if (!form.category_id) {
+        setCategoryNotes([]);
+        return;
+      }
+
+      try {
+        const data = await getCategoryNotes(form.category_id);
+        if (data && Array.isArray(data)) {
+          setCategoryNotes(data);
+        }
+      } catch (err) {
+        console.error('Ошибка при загрузке примечаний категории:', err);
+      }
+    };
+
+    loadCategoryNotes();
+  }, [form.category_id, getCategoryNotes]);
 
   // Обработка изменений полей формы
   const handleChange = (e) => {
@@ -205,8 +253,69 @@ const GoodsForm = ({ editMode = false }) => {
       newErrors.end_date = 'Дата окончания должна быть позже даты начала';
     }
     
+    if (form.total_sales_limit && parseInt(form.total_sales_limit) <= 0) {
+      newErrors.total_sales_limit = 'Общий лимит продаж должен быть больше нуля';
+    }
+    
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  // Обработчик добавления нового примечания
+  const handleAddCategoryNote = async () => {
+    if (!newNote.trim() || !form.category_id) return;
+
+    try {
+      const noteData = {
+        category_id: form.category_id,
+        text: newNote.trim()
+      };
+      
+      const result = await createCategoryNote(noteData);
+      if (result && !result.error) {
+        setCategoryNotes([...categoryNotes, result]);
+        setForm({ ...form, note: result.text });
+        setNewNote('');
+        setIsAddingNote(false);
+        toast.success('Примечание добавлено');
+      }
+    } catch (err) {
+      console.error('Ошибка при добавлении примечания:', err);
+      toast.error('Ошибка при добавлении примечания');
+    }
+  };
+
+  // Обработчик добавления нового требования подтверждения
+  const handleAddRequirement = () => {
+    setForm({
+      ...form,
+      confirmation_requirements: [
+        ...form.confirmation_requirements || [],
+        {
+          id: Date.now().toString(),
+          title: '',
+          type: 'text'
+        }
+      ]
+    });
+  };
+  
+  // Обработчик удаления требования подтверждения
+  const handleRemoveRequirement = (id) => {
+    setForm({
+      ...form,
+      confirmation_requirements: form.confirmation_requirements.filter(req => req.id !== id)
+    });
+  };
+  
+  // Обработчик изменения требования подтверждения
+  const handleRequirementChange = (id, field, value) => {
+    setForm({
+      ...form,
+      confirmation_requirements: form.confirmation_requirements.map(req => 
+        req.id === id ? { ...req, [field]: value } : req
+      )
+    });
   };
 
   // Отправка формы
@@ -228,7 +337,9 @@ const GoodsForm = ({ editMode = false }) => {
         cashback_percent: Number(form.cashback_percent),
         min_daily: Number(form.min_daily),
         max_daily: Number(form.max_daily),
-        category_id: form.category_id ? Number(form.category_id) : null
+        total_sales_limit: form.total_sales_limit ? Number(form.total_sales_limit) : null,
+        category_id: form.category_id ? Number(form.category_id) : null,
+        note: form.note || null
       };
       
       console.log('Submitting form data:', goodsData);
@@ -258,6 +369,54 @@ const GoodsForm = ({ editMode = false }) => {
       toast.error(`Ошибка при ${editMode ? 'обновлении' : 'создании'} товара: ${err.message}`);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Обработка изменений полей формы новой категории
+  const handleNewCategoryChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setNewCategoryForm(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  // Функция создания новой категории
+  const handleCreateCategory = async () => {
+    if (!newCategoryForm.name.trim()) {
+      toast.error('Название категории обязательно');
+      return;
+    }
+
+    setCreatingCategory(true);
+    try {
+      const result = await createCategory(newCategoryForm);
+      
+      if (result && !result.error) {
+        // Добавляем новую категорию в список и выбираем её
+        setCategories([...categories, result]);
+        setForm(prev => ({
+          ...prev,
+          category_id: result.id
+        }));
+        
+        // Очищаем форму и закрываем модальное окно
+        setNewCategoryForm({
+          name: '',
+          description: '',
+          is_active: true
+        });
+        setShowCreateCategoryModal(false);
+        
+        toast.success('Категория успешно создана');
+      } else {
+        toast.error('Не удалось создать категорию');
+      }
+    } catch (error) {
+      console.error('Ошибка при создании категории:', error);
+      toast.error(`Ошибка при создании категории: ${error.message || 'Неизвестная ошибка'}`);
+    } finally {
+      setCreatingCategory(false);
     }
   };
 
@@ -356,25 +515,184 @@ const GoodsForm = ({ editMode = false }) => {
           {errors.article && <p className={errorClass}>{errors.article}</p>}
         </div>
         
-        {/* Категория */}
+        {/* Категория с кнопкой создания новой */}
         <div>
           <label htmlFor="category_id" className={labelClass}>
             Категория
           </label>
-          <select
-            id="category_id"
-            name="category_id"
-            value={form.category_id}
-            onChange={handleChange}
-            className={inputClass}
+          <div className="flex space-x-2">
+            <select
+              id="category_id"
+              name="category_id"
+              value={form.category_id || ''}
+              onChange={handleChange}
+              className={`${inputClass} flex-grow`}
+            >
+              <option value="">Выберите категорию</option>
+              {categories.map(category => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setShowCreateCategoryModal(true)}
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+              Новая
+            </button>
+          </div>
+        </div>
+        
+        {/* Примечание к товару - Отображается только если выбрана категория */}
+        {form.category_id && (
+          <div>
+            <label htmlFor="note" className={labelClass}>
+              Примечание
+            </label>
+            
+            {isAddingNote ? (
+              <div className="space-y-2">
+                <textarea
+                  id="new_note"
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  rows="3"
+                  className={inputClass}
+                  placeholder="Введите новое примечание"
+                />
+                <div className="flex space-x-2">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleAddCategoryNote}
+                  >
+                    Добавить
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setIsAddingNote(false)}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <select
+                  id="note"
+                  name="note"
+                  value={form.note || ''}
+                  onChange={handleChange}
+                  className={inputClass}
+                >
+                  <option value="">Выберите примечание</option>
+                  {categoryNotes.map(note => (
+                    <option key={note.id} value={note.text}>
+                      {note.text}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="text-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                  onClick={() => setIsAddingNote(true)}
+                >
+                  + Добавить новое примечание
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Требования для подтверждения покупки */}
+        <div className="mb-6">
+          <h3 className={`text-xl font-medium mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+            Требования для подтверждения покупки
+          </h3>
+          <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+            Укажите, какую информацию нужно запросить у клиента для подтверждения покупки
+          </p>
+          
+          {form.confirmation_requirements && form.confirmation_requirements.length > 0 ? (
+            <div className="space-y-4 mb-4">
+              {form.confirmation_requirements.map((req) => (
+                <div 
+                  key={req.id} 
+                  className={`p-4 rounded-lg border ${
+                    isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-200'
+                  } flex flex-col gap-3`}
+                >
+                  <div className="flex justify-between items-center">
+                    <h4 className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                      Требование {form.confirmation_requirements.findIndex(r => r.id === req.id) + 1}
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveRequirement(req.id)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      Заголовок
+                    </label>
+                    <input
+                      type="text"
+                      value={req.title}
+                      onChange={(e) => handleRequirementChange(req.id, 'title', e.target.value)}
+                      className={inputClass}
+                      placeholder="Например: Скриншот заказа"
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      Тип данных
+                    </label>
+                    <select
+                      value={req.type}
+                      onChange={(e) => handleRequirementChange(req.id, 'type', e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="text">Текст</option>
+                      <option value="photo">Фото</option>
+                      <option value="video">Видео</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className={`p-4 rounded-lg border text-center ${
+              isDarkMode ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-gray-50 border-gray-200 text-gray-500'
+            }`}>
+              Нет добавленных требований
+            </div>
+          )}
+          
+          <button
+            type="button"
+            onClick={handleAddRequirement}
+            className={`mt-3 flex items-center px-4 py-2 rounded-md ${
+              isDarkMode 
+                ? 'bg-gray-700 text-blue-400 hover:bg-gray-600' 
+                : 'bg-gray-100 text-blue-600 hover:bg-gray-200'
+            }`}
           >
-            <option value="">Выберите категорию</option>
-            {categories.map(category => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+            </svg>
+            Добавить требование
+          </button>
         </div>
         
         {/* Цена */}
@@ -539,6 +857,28 @@ const GoodsForm = ({ editMode = false }) => {
           {errors.max_daily && <p className={errorClass}>{errors.max_daily}</p>}
         </div>
         
+        {/* Общий лимит продаж */}
+        <div>
+          <label htmlFor="total_sales_limit" className={labelClass}>
+            Общий лимит продаж
+          </label>
+          <input
+            type="number"
+            id="total_sales_limit"
+            name="total_sales_limit"
+            value={form.total_sales_limit}
+            onChange={handleChange}
+            className={inputClass}
+            min="1"
+            step="1"
+            placeholder="Оставьте пустым, если нет ограничения"
+          />
+          {errors.total_sales_limit && <p className={errorClass}>{errors.total_sales_limit}</p>}
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Максимальное количество товара, которое можно продать за весь период
+          </p>
+        </div>
+        
         {/* Кнопки действий */}
         <div className="flex justify-end space-x-4 mt-8">
           <button
@@ -563,6 +903,101 @@ const GoodsForm = ({ editMode = false }) => {
           </button>
         </div>
       </form>
+
+      {/* Модальное окно для создания новой категории */}
+      {showCreateCategoryModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className={`absolute inset-0 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-500'} opacity-75`}></div>
+            </div>
+
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            
+            <div 
+              className={`inline-block align-bottom rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full ${
+                isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'
+              }`}
+            >
+              <div className="px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <h3 className="text-lg leading-6 font-medium mb-4">
+                  Создание новой категории
+                </h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="name" className={`block mb-1 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      Название категории*
+                    </label>
+                    <input
+                      type="text"
+                      id="name"
+                      name="name"
+                      value={newCategoryForm.name}
+                      onChange={handleNewCategoryChange}
+                      className={inputClass}
+                      placeholder="Введите название категории"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="description" className={`block mb-1 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      Описание
+                    </label>
+                    <textarea
+                      id="description"
+                      name="description"
+                      value={newCategoryForm.description}
+                      onChange={handleNewCategoryChange}
+                      className={inputClass}
+                      rows="3"
+                      placeholder="Введите описание категории"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="is_active"
+                      name="is_active"
+                      checked={newCategoryForm.is_active}
+                      onChange={handleNewCategoryChange}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="is_active" className={`ml-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      Активна
+                    </label>
+                  </div>
+                </div>
+              </div>
+              
+              <div className={`px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse ${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+                <button
+                  type="button"
+                  className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-green-600 text-base font-medium text-white hover:bg-green-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm ${
+                    creatingCategory ? 'opacity-70 cursor-wait' : ''
+                  }`}
+                  onClick={handleCreateCategory}
+                  disabled={creatingCategory}
+                >
+                  {creatingCategory ? 'Создание...' : 'Создать категорию'}
+                </button>
+                <button
+                  type="button"
+                  className={`mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 ${
+                    isDarkMode ? 'bg-gray-600 text-white hover:bg-gray-500' : 'bg-white text-gray-700 hover:bg-gray-50'
+                  } focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm`}
+                  onClick={() => setShowCreateCategoryModal(false)}
+                  disabled={creatingCategory}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

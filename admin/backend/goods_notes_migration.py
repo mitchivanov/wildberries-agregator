@@ -43,7 +43,7 @@ def check_if_exists(conn, query, params=None):
         return cursor.fetchone()[0]
 
 def run_migration():
-    """Выполняет миграцию для добавления поля is_hidden"""
+    """Выполняет миграцию для добавления поля note к товарам"""
     conn = None
     try:
         # Подключаемся к базе данных
@@ -51,63 +51,46 @@ def run_migration():
         conn = psycopg2.connect(**DB_PARAMS)
         conn.autocommit = False
         
-        # 1. Проверяем существование колонки is_hidden
+        # Проверяем существование колонки note в таблице goods
         column_exists_query = """
             SELECT EXISTS (
                 SELECT FROM information_schema.columns 
                 WHERE table_schema = 'public' 
                 AND table_name = 'goods' 
-                AND column_name = 'is_hidden'
+                AND column_name = 'note'
             );
         """
         column_exists = check_if_exists(conn, column_exists_query)
         
-        # 2. Добавляем колонку is_hidden если не существует
         if not column_exists:
-            add_column_sql = """
-            ALTER TABLE goods 
-            ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+            # Добавляем колонку note
+            alter_table_sql = """
+                ALTER TABLE goods 
+                ADD COLUMN note TEXT DEFAULT NULL;
             """
-            if not execute_sql(conn, add_column_sql, description="Добавлена колонка is_hidden в таблицу goods"):
+            if not execute_sql(conn, alter_table_sql, description="Добавлена колонка note"):
                 conn.rollback()
                 return False
             
-            # Создаем индекс для оптимизации запросов
-            create_index_sql = """
-            CREATE INDEX ix_goods_is_hidden ON goods (is_hidden);
-            """
-            if not execute_sql(conn, create_index_sql, description="Создан индекс для колонки is_hidden"):
-                conn.rollback()
-                return False
-        else:
-            logger.info("ℹ️ Колонка is_hidden уже существует")
+            logger.info("✅ Колонка note добавлена в таблицу goods")
         
-        # 3. Обновляем версию миграции
-        update_version_sql = """
-        UPDATE alembic_version 
-        SET version_num = 'add_is_hidden_column'
-        WHERE version_num = 'a5b1c3d4e5f6';
-        """
-        if not execute_sql(conn, update_version_sql, description="Обновлена версия миграции"):
-            conn.rollback()
-            return False
-        
-        # Фиксируем изменения
+        # Подтверждаем транзакцию
         conn.commit()
-        logger.info("✅ Миграция успешно завершена!")
+        logger.info("✅ Миграция успешно завершена")
         return True
         
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
+        logger.error(f"❌ Ошибка: {e}")
         if conn:
             conn.rollback()
+        logger.error("❌ Миграция завершилась с ошибкой")
         return False
     finally:
         if conn:
             conn.close()
 
 if __name__ == "__main__":
-    logger.info("🚀 Запуск прямой миграции для добавления поля is_hidden...")
+    logger.info("🚀 Запуск миграции для добавления поля примечаний к товарам...")
     if not run_migration():
         logger.error("❌ Миграция завершилась с ошибкой")
         sys.exit(1)

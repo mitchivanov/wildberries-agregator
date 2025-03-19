@@ -3,12 +3,9 @@ import axios from 'axios';
 import { toast } from 'react-hot-toast';
 import { useTelegram } from './useTelegram';
 
-
-const VITE_API_URL = import.meta.env.VITE_API_URL;
-
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'https://develooper.ru/api',
+  baseURL: 'https://53f8-89-169-52-137.ngrok-free.app/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -40,6 +37,34 @@ api.interceptors.response.use(
 
 // Кэш для запросов
 const queryCache = new Map();
+
+// Функция для получения URL медиафайла
+const getMediaUrl = (path) => {
+  if (!path) return '';
+  
+  // Проверяем, является ли путь уже полным URL
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  
+  // Удаляем лишние 'uploads/' из пути, если они есть
+  let normalizedPath = path;
+  if (normalizedPath.startsWith('uploads/')) {
+    normalizedPath = normalizedPath.substring(8); // Удаляем 'uploads/'
+  }
+  if (normalizedPath.startsWith('/uploads/')) {
+    normalizedPath = normalizedPath.substring(9); // Удаляем '/uploads/'
+  }
+  
+  // Добавляем проверку для ngrok URL
+  const baseUrl = window.location.origin;
+  
+  // Формируем правильный URL
+  return `${baseUrl}/uploads/${normalizedPath}`;
+};
+
+// Экспортируем функцию, чтобы она была доступна в useApi
+export { api, getMediaUrl };
 
 export const useApi = () => {
   const [loading, setLoading] = useState(false);
@@ -166,62 +191,56 @@ export const useApi = () => {
   }, [request]);
 
   // Получение всех бронирований
-  const getAllReservations = async () => {
+  const getAllReservations = useCallback(async () => {
+    console.log('Запрос всех бронирований');
     try {
-      const response = await axios.get('/api/reservations/');
-      return response.data;
-    } catch (error) {
-      handleApiError(error);
-      throw error;
-    }
-  };
-
-  // Функция для получения всей доступности товаров
-  const getAllAvailability = useCallback(async () => {
-    console.log('Запрос данных о доступности товаров');
-    
-    // Проверяем кэш перед запросом
-    const cacheKey = '/availability/';
-    if (queryCache.has(cacheKey)) {
-      console.log('Возвращаем кэшированные данные о доступности');
-      return queryCache.get(cacheKey);
-    }
-    
-    try {
-      const response = await api.get('/availability/');
+      // Используем наш настроенный экземпляр api вместо axios напрямую
+      const response = await api.get('/reservations/');
       
-      // Дополнительный запрос для получения информации о товарах
-      const goodsResponse = await api.get('/goods/');
-      const goodsMap = {};
-      
-      // Создаем карту товаров по ID для быстрого доступа
-      if (goodsResponse.data) {
-        goodsResponse.data.forEach(goods => {
-          goodsMap[goods.id] = {
-            name: goods.name,
-            article: goods.article
-          };
-        });
+      // Проверяем и логируем данные для отладки
+      if (response.data) {
+        const reservationsWithConfirmation = response.data.filter(r => r.confirmation_data);
+        console.log(`Получено ${response.data.length} бронирований, из них ${reservationsWithConfirmation.length} с данными подтверждения`);
+        
+        if (reservationsWithConfirmation.length > 0) {
+          console.log('Пример данных подтверждения:', 
+            Object.keys(reservationsWithConfirmation[0].confirmation_data));
+        }
       }
       
-      // Добавляем информацию о товарах к данным о доступности
-      const enrichedData = response.data.map(item => ({
-        ...item,
-        goods_name: goodsMap[item.goods_id]?.name || null,
-        goods_article: goodsMap[item.goods_id]?.article || null
-      }));
-      
-      // Сохраняем в кэш
-      queryCache.set(cacheKey, enrichedData);
-      
-      return enrichedData;
+      return response.data;
     } catch (error) {
-      const errorMessage = error.response?.data?.detail || error.message;
-      console.error('Ошибка при получении данных о доступности:', errorMessage);
-      toast.error(`Ошибка: ${errorMessage}`);
+      console.error('Ошибка при получении списка бронирований:', error);
+      toast.error('Не удалось загрузить бронирования');
       throw error;
     }
-  }, []);
+  }, [api]);
+
+  // Добавить функцию для получения всех данных о доступности
+  const getAllAvailability = useCallback(async (dateFrom, dateTo) => {
+    try {
+      let url = '/availability/';
+      const params = new URLSearchParams();
+      
+      if (dateFrom) {
+        params.append('date_from', dateFrom.toISOString());
+      }
+      
+      if (dateTo) {
+        params.append('date_to', dateTo.toISOString());
+      }
+      
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+      
+      const response = await api.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при получении данных о доступности:', error);
+      throw error;
+    }
+  }, [api]);
 
   // Функция для маскирования артикула (последние 4 цифры видны)
   const maskArticle = useCallback((article) => {
@@ -236,12 +255,6 @@ export const useApi = () => {
     
     return maskedPart + visiblePart;
   }, []);
-
-  // Добавляем функцию для парсинга товара с Wildberries
-  const parseWildberriesUrl = useCallback(async (url) => {
-    console.log(`Парсинг товара Wildberries: ${url}`);
-    return request('post', '/parse-wildberries/', { url });
-  }, [request]);
 
   // Добавляем методы для работы с категориями
   const createCategory = useCallback(async (categoryData) => {
@@ -339,6 +352,275 @@ export const useApi = () => {
     }
   }, [request]);
 
+  // Добавляем методы для работы с примечаниями категорий
+  const getCategoryNotes = useCallback(async (categoryId) => {
+    console.log('Запрос примечаний категории:', categoryId);
+    return request('get', `/category-notes/${categoryId}`);
+  }, [request]);
+
+  const createCategoryNote = useCallback(async (noteData) => {
+    console.log('Создание нового примечания для категории:', noteData);
+    return request('post', '/category-notes/', noteData);
+  }, [request]);
+
+  const deleteCategoryNote = useCallback(async (noteId) => {
+    console.log('Удаление примечания категории:', noteId);
+    return request('delete', `/category-notes/${noteId}`);
+  }, [request]);
+
+  // Получение бронирований пользователя
+  const getUserReservations = useCallback(async (status = 'active') => {
+    console.log(`Запрос бронирований пользователя со статусом: ${status}`);
+    
+    try {
+      // Добавляем параметр status в запрос
+      const response = await api.get(`/user-reservations/?status=${status}`);
+      
+      // Проверяем и обрабатываем данные о товарах
+      if (response.data && Array.isArray(response.data)) {
+        console.log('Получено бронирований:', response.data.length);
+        
+        // Убедимся, что у каждого бронирования есть данные о товаре
+        const processedReservations = await Promise.all(response.data.map(async (reservation) => {
+          if (!reservation.goods && reservation.goods_id) {
+            console.log(`Загружаем данные для товара ${reservation.goods_id}`);
+            try {
+              const goodsData = await getGoodsById(reservation.goods_id);
+              return {
+                ...reservation,
+                goods: goodsData
+              };
+            } catch (error) {
+              console.error(`Ошибка при загрузке товара ${reservation.goods_id}:`, error);
+              return reservation;
+            }
+          }
+          return reservation;
+        }));
+        
+        return processedReservations;
+      }
+      
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при получении бронирований:', error);
+      toast.error('Не удалось загрузить ваши бронирования');
+      throw error;
+    }
+  }, [getGoodsById]);
+  
+  // Отмена бронирования
+  const cancelReservation = async (reservationId) => {
+    try {
+      await api.delete(`/reservations/${reservationId}`);
+      return true;
+    } catch (error) {
+      handleApiError(error);
+      throw error;
+    }
+  };
+  
+  // Подтверждение заказа (перевод из PENDING в ACTIVE)
+  const confirmReservationOrder = useCallback(async (reservationId, formData) => {
+    console.log(`Отправка подтверждения заказа для бронирования ${reservationId}`);
+    
+    try {
+      setLoading(true);
+      
+      // Создаем FormData и добавляем все поля
+      const form = new FormData();
+      
+      // Собираем информацию о файлах для логирования
+      const fileInfo = [];
+      
+      // Добавляем все текстовые поля и метаданные
+      Object.entries(formData.formData).forEach(([fieldId, data]) => {
+        // Добавляем метаданные для всех полей
+        form.append(`field_${fieldId}_meta`, JSON.stringify({
+          id: fieldId,
+          type: data.type,
+          title: data.title
+        }));
+        
+        if (data.type === 'text') {
+          form.append(`field_${fieldId}_text`, data.value);
+          console.log(`Добавлено текстовое поле field_${fieldId}_text:`, data.value);
+        } else if (data.file) {
+          // Логируем информацию о файле перед отправкой
+          const fileSize = data.file.size / 1024 / 1024; // в МБ
+          console.log(`Добавляем файл field_${fieldId}_file:`, {
+            name: data.file.name,
+            type: data.file.type,
+            size: `${fileSize.toFixed(2)} МБ`
+          });
+          
+          form.append(`field_${fieldId}_file`, data.file);
+          fileInfo.push({
+            fieldId,
+            name: data.file.name,
+            size: `${fileSize.toFixed(2)} МБ`
+          });
+        }
+      });
+      
+      // Отладочная информация о содержимом FormData
+      console.log('Отправляемые файлы:', fileInfo);
+      
+      // Показываем индикатор загрузки
+      toast.loading('Отправка данных...', { id: 'uploadStatus' });
+
+      const response = await api.post(
+        `/reservations/${reservationId}/confirm-order`,
+        form,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          },
+          // Добавляем обработчик прогресса загрузки
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+            // Обновляем сообщение о прогрессе
+            toast.loading(`Загрузка: ${percentCompleted}%`, 
+              { id: 'uploadStatus' });
+          }
+        }
+      );
+      
+      // Закрываем индикатор загрузки
+      toast.dismiss('uploadStatus');
+      
+      console.log('Ответ сервера:', response.data);
+      
+      if (response.status === 200) {
+        return { success: true, data: response.data };
+      }
+      
+      return { success: false, error: 'Ошибка при отправке данных' };
+    } catch (error) {
+      // Закрываем индикатор загрузки
+      toast.dismiss('uploadStatus');
+      
+      console.error('Ошибка при подтверждении заказа:', error);
+      console.error('Сообщение ошибки:', error.message);
+      
+      return { 
+        success: false, 
+        error: error.response?.data?.detail || error.message || 'Неизвестная ошибка при отправке данных' 
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
+  // Подтверждение получения товара (перевод из ACTIVE в CONFIRMED)
+  const confirmReservationDelivery = useCallback(async (reservationId, formData) => {
+    console.log(`Отправка подтверждения получения для бронирования ${reservationId}`);
+    
+    try {
+      setLoading(true);
+      
+      // Создаем FormData и добавляем все поля
+      const form = new FormData();
+      
+      // Собираем информацию о файлах для логирования
+      const fileInfo = [];
+      
+      // Добавляем все текстовые поля и метаданные
+      Object.entries(formData.formData).forEach(([fieldId, data]) => {
+        // Добавляем метаданные для всех полей
+        form.append(`field_${fieldId}_meta`, JSON.stringify({
+          id: fieldId,
+          type: data.type,
+          title: data.title
+        }));
+        
+        if (data.type === 'text') {
+          form.append(`field_${fieldId}_text`, data.value);
+          console.log(`Добавлено текстовое поле field_${fieldId}_text:`, data.value);
+        } else if (data.file) {
+          // Логируем информацию о файле перед отправкой
+          const fileSize = data.file.size / 1024 / 1024; // в МБ
+          console.log(`Добавляем файл field_${fieldId}_file:`, {
+            name: data.file.name,
+            type: data.file.type,
+            size: `${fileSize.toFixed(2)} МБ`
+          });
+          
+          form.append(`field_${fieldId}_file`, data.file);
+          fileInfo.push({
+            fieldId,
+            name: data.file.name,
+            size: `${fileSize.toFixed(2)} МБ`
+          });
+        }
+      });
+      
+      // Отладочная информация о содержимом FormData
+      console.log('Отправляемые файлы:', fileInfo);
+      
+      // Показываем индикатор загрузки
+      toast.loading('Отправка данных...', { id: 'uploadStatus' });
+
+      const response = await api.post(
+        `/reservations/${reservationId}/confirm-delivery`,
+        form,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          },
+          // Добавляем обработчик прогресса загрузки
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+            // Обновляем сообщение о прогрессе
+            toast.loading(`Загрузка: ${percentCompleted}%`, 
+              { id: 'uploadStatus' });
+          }
+        }
+      );
+      
+      // Закрываем индикатор загрузки
+      toast.dismiss('uploadStatus');
+      
+      console.log('Ответ сервера:', response.data);
+      
+      if (response.status === 200) {
+        return { success: true, data: response.data };
+      }
+      
+      return { success: false, error: 'Ошибка при отправке данных' };
+    } catch (error) {
+      // Закрываем индикатор загрузки
+      toast.dismiss('uploadStatus');
+      
+      console.error('Ошибка при подтверждении получения:', error);
+      console.error('Сообщение ошибки:', error.message);
+      
+      return { 
+        success: false, 
+        error: error.response?.data?.detail || error.message || 'Неизвестная ошибка при отправке данных' 
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
+  // Старый метод submitConfirmationData переименуем для совместимости
+  const submitConfirmationData = useCallback(async (reservationId, formData) => {
+    console.log('Используется устаревший метод submitConfirmationData, необходимо заменить на confirmReservationOrder или confirmReservationDelivery');
+    return confirmReservationOrder(reservationId, formData);
+  }, [confirmReservationOrder]);
+
+  // Добавляем функцию для парсинга товара с Wildberries
+  const parseWildberriesUrl = useCallback(async (url) => {
+    console.log(`Парсинг товара Wildberries: ${url}`);
+    return request('post', '/parse-wildberries/', { url });
+  }, [request]);
+
+
   return {
     loading,
     error,
@@ -352,13 +634,22 @@ export const useApi = () => {
     getAllReservations,
     getAllAvailability,
     maskArticle,
-    parseWildberriesUrl,
     getCategories,
     getCategoryById,
     deleteCategory,
     createCategory,
     updateCategory,
     bulkHideGoods,
-    bulkShowGoods
+    bulkShowGoods,
+    getCategoryNotes,
+    createCategoryNote,
+    deleteCategoryNote,
+    getUserReservations,
+    cancelReservation,
+    confirmReservationOrder,
+    confirmReservationDelivery,
+    submitConfirmationData,
+    parseWildberriesUrl,
+    getMediaUrl: (path) => getMediaUrl(path),
   };
 }; 

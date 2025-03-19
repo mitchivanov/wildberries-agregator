@@ -15,6 +15,7 @@ import AllAvailability from './pages/AllAvailability';
 import Categories from './pages/Categories';
 import CreateCategory from './pages/CreateCategory';
 import EditCategory from './pages/EditCategory';
+import UserReservations from './pages/UserReservations';
 
 console.log('=== Рендеринг App компонента ===');
 
@@ -64,6 +65,7 @@ function App() {
           {/* Публичные маршруты */}
           <Route path="/" element={<Catalog />} />
           <Route path="/goods/:id" element={<GoodsDetail />} />
+          <Route path="/reservations" element={<UserReservations />} />
           
           {/* Маршруты админки */}
           <Route path="/admin" element={<AdminLogin />} />

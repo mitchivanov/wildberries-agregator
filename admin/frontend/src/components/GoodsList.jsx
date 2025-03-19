@@ -366,6 +366,15 @@ const GoodsList = () => {
                           <SortableHeader column="max_daily" label="Макс. в день" />
                           <SortableHeader column="is_active" label="Статус" />
                           <SortableHeader column="is_hidden" label="Видимость" />
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                            Лимит продаж
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                            Примечание
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                            Подтверждение
+                          </th>
                           <th scope="col" className="px-6 py-3">Действия</th>
                         </tr>
                       </thead>
@@ -465,6 +474,24 @@ const GoodsList = () => {
                                   </span>
                                 )}
                               </span>
+                            </td>
+                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                              {item.total_sales_limit ? 
+                                `${item.total_sales_limit} шт.` : 
+                                <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>Нет</span>
+                              }
+                            </td>
+                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                              {item.note ? 
+                                item.note : 
+                                <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>Нет примечаний</span>
+                              }
+                            </td>
+                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                              {item.confirmation_requirements ? 
+                                `${item.confirmation_requirements.length} требований` : 
+                                <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>Нет</span>
+                              }
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <div className="flex justify-end space-x-3">

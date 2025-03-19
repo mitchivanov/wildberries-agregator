@@ -26,24 +26,25 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - backend-network
       - frontend-network
+
   frontend:
     build:
       context: ./admin/frontend
-      args:
-        # Добавляем args для передачи в Dockerfile
-        - VITE_API_URL=${VITE_API_URL}
-        - VITE_ADMIN_LOGIN=${VITE_ADMIN_LOGIN}
-        - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
-        - VITE_TELEGRAM_WEBAPP_URL=${VITE_TELEGRAM_WEBAPP_URL}
+
     volumes:
-      # Монтируем сертификаты из хост-системы
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./uploads:/usr/share/nginx/html/uploads:ro
     ports:
       - "80:80"
       - "443:443"
@@ -72,7 +73,6 @@ services:
 
 volumes:
   postgres_data:
-
 
 networks:
   backend-network:

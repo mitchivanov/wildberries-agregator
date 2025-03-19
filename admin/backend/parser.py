@@ -34,13 +34,21 @@ def get_basket_host(vol: int) -> str:
     elif 1602 <= vol <= 1655: return '11'
     elif 1656 <= vol <= 1919: return '12'
     elif 1920 <= vol <= 2045: return '13'
-    elif 1920 <= vol <= 2189: return '14'
-    elif 1920 <= vol <= 2405: return '15'
-    elif 1920 <= vol <= 2621: return '16'
-    elif 1920 <= vol <= 2837: return '17'
-    elif 1920 <= vol <= 3053: return '18'
-    elif 1920 <= vol <= 3269: return '19'
-    else: return '20'
+    elif 2046 <= vol <= 2189: return '14'
+    elif 2190 <= vol <= 2405: return '15'
+    elif 2406 <= vol <= 2621: return '16'
+    elif 2622 <= vol <= 2837: return '17'
+    elif 2838 <= vol <= 3053: return '18'
+    elif 3054 <= vol <= 3269: return '19'
+    elif 3270 <= vol <= 3485: return '20'
+    elif 3486 <= vol <= 3701: return '21'
+    elif 3702 <= vol <= 3917: return '22'
+    elif 3918 <= vol <= 4133: return '23'
+    elif 4134 <= vol <= 4349: return '24'
+    elif 4350 <= vol <= 4565: return '25'
+    elif 4566 <= vol <= 4781: return '26'
+    
+    
 
 async def get_product_details(product_id):
     """Получение данных о товаре через API"""
@@ -100,6 +108,60 @@ async def get_product_details(product_id):
             logger.exception(f"Исключение при получении данных товара: {e}")
             return None
 
+async def get_image_url(nm, vol, part, start_host):
+    """Получение URL изображения сначала по алгоритму, затем перебором"""
+    # Список возможных размеров изображений
+    image_sizes = ['big', 'c516x688', 'c246x328']
+    
+    # Сначала пробуем все размеры с рассчитанным хостом
+    async with aiohttp.ClientSession() as session:
+        # Проверяем сначала все размеры с рассчитанным хостом
+        for size in image_sizes:
+            image_url = f"https://basket-{start_host}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/{size}/1.webp"
+            logger.debug(f"Проверка доступности изображения с рассчитанным хостом: {image_url}")
+            
+            try:
+                async with session.head(image_url, timeout=3) as response:
+                    if response.status == 200:
+                        logger.info(f"Найдено доступное изображение (рассчитанный хост): {image_url}")
+                        return image_url
+            except Exception as e:
+                logger.debug(f"Ошибка при проверке изображения {image_url}: {e}")
+        
+        # Если точный алгоритм не сработал, перебираем все варианты
+        logger.warning("Точный алгоритм не сработал, пробуем перебор всех вариантов")
+        basket_numbers = ['01', '02', '03', '04', '05', '06', '07', '08', '09', 
+                          '10', '11', '12', '13', '14', '15', '16', '17', '18', '19',
+                          '20', '21', '22', '23', '24', '25', '26', '27', '28', '29',
+                          '30', '31', '32', '33', '34', '35', '36', '37', '38', '39',
+                          '40', '41', '42', '43', '44', '45', '46', '47', '48', '49',
+                          '50', '51', '52', '53', '54', '55', '56', '57', '58', '59',
+                          '60', '61', '62', '63', '64', '65', '66', '67', '68', '69',
+                          '70', '71', '72', '73', '74', '75', '76', '77', '78', '79',
+                          '80', '81', '82', '83', '84', '85', '86', '87', '88', '89',
+                          ]
+        
+        # Пропускаем тот хост, который уже проверили
+        basket_numbers = [basket for basket in basket_numbers if basket != start_host]
+        
+        for basket in basket_numbers:
+            for size in image_sizes:
+                image_url = f"https://basket-{basket}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/{size}/1.webp"
+                logger.debug(f"Проверка доступности изображения (перебор): {image_url}")
+                
+                try:
+                    async with session.head(image_url, timeout=3) as response:
+                        if response.status == 200:
+                            logger.info(f"Найдено доступное изображение (перебор): {image_url}")
+                            return image_url
+                except Exception as e:
+                    logger.debug(f"Ошибка при проверке изображения {image_url}: {e}")
+    
+    # Если ничего не нашли, возвращаем базовый URL
+    default_url = f"https://basket-{start_host}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/big/1.webp"
+    logger.warning(f"Не найдено доступное изображение, возвращаем стандартный URL: {default_url}")
+    return default_url
+
 async def parse_wildberries_url(url):
     """
     Основная функция для парсинга данных с Wildberries по URL
@@ -151,8 +213,8 @@ async def parse_wildberries_url(url):
             # Получаем номер хоста
             host = get_basket_host(vol)
             
-            # Создаем URL изображения большого размера
-            image_url = f"https://basket-{host}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/big/1.webp"
+            # Получаем URL изображения с перебором хостов
+            image_url = await get_image_url(nm, vol, part, host)
         except Exception as e:
             logger.error(f"Ошибка при формировании URL изображения: {e}")
         
