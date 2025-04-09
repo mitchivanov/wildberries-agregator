@@ -82,15 +82,28 @@ def run_migration():
         else:
             logger.info("ℹ️ Колонка is_hidden уже существует")
         
-        # 3. Обновляем версию миграции
-        update_version_sql = """
-        UPDATE alembic_version 
-        SET version_num = 'add_is_hidden_column'
-        WHERE version_num = 'a5b1c3d4e5f6';
+        # 3. Проверяем существование таблицы alembic_version
+        table_exists_query = """
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'alembic_version'
+            );
         """
-        if not execute_sql(conn, update_version_sql, description="Обновлена версия миграции"):
-            conn.rollback()
-            return False
+        table_exists = check_if_exists(conn, table_exists_query)
+        
+        # 4. Обновляем версию миграции только если таблица существует
+        if table_exists:
+            update_version_sql = """
+            UPDATE alembic_version 
+            SET version_num = 'add_is_hidden_column'
+            WHERE version_num = 'a5b1c3d4e5f6';
+            """
+            if not execute_sql(conn, update_version_sql, description="Обновлена версия миграции"):
+                conn.rollback()
+                return False
+        else:
+            logger.info("ℹ️ Таблица alembic_version не существует, пропускаем обновление версии")
         
         # Фиксируем изменения
         conn.commit()

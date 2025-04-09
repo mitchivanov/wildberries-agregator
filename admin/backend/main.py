@@ -626,40 +626,65 @@ async def get_goods_details(
 
 # Функция для отправки уведомления в бот
 async def notify_bot_about_reservation(user_id, goods_data, quantity):
-    """Отправляет уведомление в Telegram бот о новом бронировании"""
+    """Отправляет уведомление в Telegram бот о новом бронировании с повторными попытками"""
     bot_api_url = BOT_API_URL + "/send_notification"
+    max_retries = 3
+    retry_delay = 1  # Начальная задержка в секундах
     
-    try:
-        # Подготавливаем данные для отправки в бота
-        data = {
-            "user_id": user_id,
-            "goods_data": goods_data,
-            "quantity": quantity
-        }
-        
-        # Асинхронный запрос к API бота
-        async with ClientSession() as session:
-            async with session.post(bot_api_url, json=data) as response:
-                # Проверяем статус ответа
-                if response.status != 200:
-                    response_text = await response.text()
-                    logger.error(f"Ошибка при отправке уведомления в бот: {response.status}, {response_text}")
-                    return False
-                
-                # Парсим JSON из ответа
-                response_data = await response.json()
-                
-                # Проверяем статус операции
-                if response_data.get("status") != "success":
-                    error_message = response_data.get("message", "Неизвестная ошибка")
-                    logger.warning(f"Бот не смог отправить уведомление: {error_message}")
-                    return False
-                
-                logger.info(f"Уведомление успешно отправлено в бот для пользователя {user_id}")
-                return True
-    except Exception as e:
-        logger.error(f"Исключение при отправке уведомления в бот: {str(e)}")
-        return False
+    for attempt in range(max_retries):
+        try:
+            # Подготавливаем данные для отправки в бота
+            data = {
+                "user_id": user_id,
+                "goods_data": goods_data,
+                "quantity": quantity,
+                "attempt": attempt + 1  # Добавляем номер попытки
+            }
+            
+            # Асинхронный запрос к API бота
+            async with ClientSession() as session:
+                async with session.post(bot_api_url, json=data) as response:
+                    # Проверяем статус ответа
+                    if response.status != 200:
+                        response_text = await response.text()
+                        logger.error(f"Ошибка при отправке уведомления в бот (попытка {attempt + 1}): {response.status}, {response_text}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_delay * (2 ** attempt))  # Экспоненциальная задержка
+                            continue
+                        return False
+                    
+                    # Парсим JSON из ответа
+                    response_data = await response.json()
+                    
+                    # Проверяем статус операции
+                    if response_data.get("status") != "success":
+                        error_message = response_data.get("message", "Неизвестная ошибка")
+                        logger.warning(f"Бот не смог отправить уведомление (попытка {attempt + 1}): {error_message}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_delay * (2 ** attempt))
+                            continue
+                        return False
+                    
+                    # Проверяем подтверждение доставки
+                    if not response_data.get("delivery_confirmed", False):
+                        logger.warning(f"Нет подтверждения доставки уведомления (попытка {attempt + 1})")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_delay * (2 ** attempt))
+                            continue
+                        return False
+                    
+                    logger.info(f"Уведомление успешно отправлено в бот для пользователя {user_id} (попытка {attempt + 1})")
+                    return True
+                    
+        except Exception as e:
+            logger.error(f"Исключение при отправке уведомления в бот (попытка {attempt + 1}): {str(e)}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay * (2 ** attempt))
+                continue
+            return False
+    
+    logger.error(f"Не удалось отправить уведомление после {max_retries} попыток")
+    return False
 
 @app.post("/reservations/", response_model=ReservationResponse, status_code=status.HTTP_201_CREATED)
 async def create_reservation(
