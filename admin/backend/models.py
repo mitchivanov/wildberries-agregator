@@ -42,8 +42,8 @@ class Goods(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     category = relationship("Category", back_populates="goods")
-    daily_availability = relationship("DailyAvailability", back_populates="goods")
-    reservations = relationship("Reservation", back_populates="goods")
+    daily_availability = relationship("DailyAvailability", back_populates="goods", cascade="all, delete-orphan")
+    reservations = relationship("Reservation", back_populates="goods", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"Goods(id={self.id}, name={self.name})"
@@ -52,7 +52,7 @@ class DailyAvailability(Base):
     __tablename__ = "daily_availability"
     
     id = Column(Integer, primary_key=True, index=True)
-    goods_id = Column(Integer, ForeignKey('goods.id'), index=True)
+    goods_id = Column(Integer, ForeignKey('goods.id', ondelete='CASCADE'), index=True)
     date = Column(DateTime(timezone=True), index=True)
     available_quantity = Column(Integer, default=0)
     
@@ -65,7 +65,7 @@ class Reservation(Base):
     __tablename__ = "reservations"
     
     id = Column(Integer, primary_key=True, index=True)
-    goods_id = Column(Integer, ForeignKey('goods.id'), index=True)
+    goods_id = Column(Integer, ForeignKey('goods.id', ondelete='CASCADE'), index=True)
     user_id = Column(BigInteger, index=True)
     quantity = Column(Integer, default=1)
     reserved_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -881,7 +881,7 @@ async def send_reservation_notification(request: Request):
                 parse_mode=ParseMode.HTML
             )
         logger.info(f"Уведомление успешно отправлено пользователю {user_id}")
-        return {"status": "success"}
+        return {"status": "success", "delivery_confirmed": True}
     except TelegramForbiddenError:
         # Пользователь заблокировал бота
         error_msg = f"Пользователь {user_id} заблокировал бота"
@@ -1063,27 +1063,18 @@ async def cmd_reservations(message: types.Message):
 @dp.callback_query(F.data.startswith("reservation_detail_"))
 async def reservation_detail_handler(callback: types.CallbackQuery):
     reservation_id = callback.data.split("_")[-1]
-    
     try:
-        # Получаем все бронирования пользователя
         reservations = await get_user_reservations(callback.from_user.id)
-        
-        # Находим нужное бронирование по ID
         reservation = next((r for r in reservations if str(r['id']) == reservation_id), None)
-        
         if not reservation:
             await callback.answer("Бронирование не найдено", show_alert=True)
             return
-        
-        # Форматируем дату
         reserved_date = datetime.fromisoformat(reservation['reserved_at'].replace('Z', '+00:00'))
         formatted_date = reserved_date.strftime('%d.%m.%Y %H:%M')
-        
-        # Рассчитываем цену с кэшбеком
         price = reservation['goods_price']
         cashback_percent = reservation['goods_cashback_percent'] or 0
         price_with_cashback = price * (1 - cashback_percent / 100)
-        # Формируем клавиатуру
+        # Формируем клавиатуру с новой кнопкой
         keyboard = [
             [
                 types.InlineKeyboardButton(
@@ -1093,12 +1084,17 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
             ],
             [
                 types.InlineKeyboardButton(
+                    text="📖 Посмотреть инструкцию",
+                    callback_data=f"show_guide_{reservation_id}"
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
                     text="🔙 Назад",
                     callback_data="back_to_reservations"
                 )
             ]
         ]
-        
         await callback.message.edit_text(
             f"📦 Бронирование №{reservation_id}\n\n"
             f"Товар: {reservation['goods_name']}\n"
@@ -1110,10 +1106,30 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
             parse_mode=ParseMode.HTML
         )
-        
     except Exception as e:
         logger.error(f"Ошибка при получении бронирования: {e}")
         await callback.answer("⚠️ Не удалось загрузить данные", show_alert=True)
+
+@dp.callback_query(F.data.startswith("show_guide_"))
+async def show_guide_handler(callback: types.CallbackQuery):
+    reservation_id = callback.data.split("_")[-1]
+    try:
+        reservations = await get_user_reservations(callback.from_user.id)
+        reservation = next((r for r in reservations if str(r['id']) == reservation_id), None)
+        logger.info(f"[show_guide_handler] reservation_id={reservation_id}, reservation={reservation}")
+        if not reservation:
+            await callback.answer("Бронирование не найдено", show_alert=True)
+            return
+        guide = reservation.get('goods_purchase_guide') or reservation.get('purchase_guide')
+        logger.info(f"[show_guide_handler] guide found: {guide}")
+        if guide:
+            await callback.answer()
+            await callback.message.answer(f"📖 <b>Инструкция по выкупу:</b>\n\n{guide}", parse_mode=ParseMode.HTML)
+        else:
+            await callback.answer("Инструкция отсутствует", show_alert=True)
+    except Exception as e:
+        logger.error(f"Ошибка при показе инструкции: {e}")
+        await callback.answer("⚠️ Не удалось показать инструкцию", show_alert=True)
 
 @dp.callback_query(F.data.startswith("cancel_reservation_"))
 async def cancel_reservation_handler(callback: types.CallbackQuery):

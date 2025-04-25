@@ -22,6 +22,7 @@ from parser import parse_wildberries_url
 import math
 from logging.handlers import RotatingFileHandler
 from pydantic import ValidationError
+import redis.asyncio as aioredis
 
 from database import get_db, init_db, close_db, AsyncScopedSession
 from models import Goods, Reservation, DailyAvailability, Category
@@ -82,6 +83,9 @@ BOT_API_URL = os.getenv("BOT_API_URL")
 _last_availability_request_time = 0
 _availability_cache = None
 _availability_cache_ttl = 10  # Время жизни кэша в секундах
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -625,66 +629,22 @@ async def get_goods_details(
     return goods
 
 # Функция для отправки уведомления в бот
-async def notify_bot_about_reservation(user_id, goods_data, quantity):
-    """Отправляет уведомление в Telegram бот о новом бронировании с повторными попытками"""
-    bot_api_url = BOT_API_URL + "/send_notification"
-    max_retries = 3
-    retry_delay = 1  # Начальная задержка в секундах
-    
-    for attempt in range(max_retries):
-        try:
-            # Подготавливаем данные для отправки в бота
-            data = {
-                "user_id": user_id,
-                "goods_data": goods_data,
-                "quantity": quantity,
-                "attempt": attempt + 1  # Добавляем номер попытки
-            }
-            
-            # Асинхронный запрос к API бота
-            async with ClientSession() as session:
-                async with session.post(bot_api_url, json=data) as response:
-                    # Проверяем статус ответа
-                    if response.status != 200:
-                        response_text = await response.text()
-                        logger.error(f"Ошибка при отправке уведомления в бот (попытка {attempt + 1}): {response.status}, {response_text}")
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(retry_delay * (2 ** attempt))  # Экспоненциальная задержка
-                            continue
-                        return False
-                    
-                    # Парсим JSON из ответа
-                    response_data = await response.json()
-                    
-                    # Проверяем статус операции
-                    if response_data.get("status") != "success":
-                        error_message = response_data.get("message", "Неизвестная ошибка")
-                        logger.warning(f"Бот не смог отправить уведомление (попытка {attempt + 1}): {error_message}")
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(retry_delay * (2 ** attempt))
-                            continue
-                        return False
-                    
-                    # Проверяем подтверждение доставки
-                    if not response_data.get("delivery_confirmed", False):
-                        logger.warning(f"Нет подтверждения доставки уведомления (попытка {attempt + 1})")
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(retry_delay * (2 ** attempt))
-                            continue
-                        return False
-                    
-                    logger.info(f"Уведомление успешно отправлено в бот для пользователя {user_id} (попытка {attempt + 1})")
-                    return True
-                    
-        except Exception as e:
-            logger.error(f"Исключение при отправке уведомления в бот (попытка {attempt + 1}): {str(e)}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay * (2 ** attempt))
-                continue
-            return False
-    
-    logger.error(f"Не удалось отправить уведомление после {max_retries} попыток")
-    return False
+async def push_notification_to_queue(user_id, goods_data, quantity, reservation_id=None):
+    """Кладёт уведомление о бронировании в очередь Redis"""
+    notification = {
+        "user_id": user_id,
+        "goods_data": goods_data,
+        "quantity": quantity,
+        "timestamp": datetime.utcnow().isoformat(),
+        "reservation_id": reservation_id
+    }
+    try:
+        logger.info(f"Пробуем положить уведомление в очередь Redis: {notification}")
+        await redis_client.rpush("notifications", json.dumps(notification))
+        logger.info(f"Уведомление успешно добавлено в очередь Redis для user_id={user_id}, goods_id={goods_data.get('id')}, reservation_id={reservation_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении уведомления в очередь Redis: {str(e)}")
+        raise
 
 @app.post("/reservations/", response_model=ReservationResponse, status_code=status.HTTP_201_CREATED)
 async def create_reservation(
@@ -759,23 +719,19 @@ async def create_reservation(
     await db.commit()
     await db.refresh(db_reservation)
     
-    # Отправляем уведомление боту после успешного бронирования
-    goods_data = {
-        "id": goods.id,
-        "name": goods.name,
-        "article": goods.article,
-        "price": goods.price,
-        "cashback_percent": goods.cashback_percent,
-        "image": goods.image,
-        "purchase_guide": goods.purchase_guide
-    }
-    
-    # Отправляем уведомление, но не ждем результата
-    # Обернем в try-except для предотвращения ошибок
+    # Отправляем уведомление через очередь Redis
     try:
-        asyncio.create_task(notify_bot_about_reservation(user_id, goods_data, reservation.quantity))
+        await push_notification_to_queue(user_id, {
+            "id": goods.id,
+            "name": goods.name,
+            "article": goods.article,
+            "price": goods.price,
+            "cashback_percent": goods.cashback_percent,
+            "image": goods.image,
+            "purchase_guide": goods.purchase_guide
+        }, reservation.quantity, db_reservation.id)
     except Exception as e:
-        logger.error(f"Ошибка при создании задачи для отправки уведомления: {str(e)}")
+        logger.error(f"Ошибка при постановке уведомления в очередь: {str(e)}")
     
     # Успешно возвращаем данные о бронировании
     return db_reservation
@@ -812,7 +768,8 @@ async def get_user_reservations(
             "goods_name": goods.name if goods else None,
             "goods_image": goods.image if goods else None,
             "goods_price": goods.price if goods else None,
-            "goods_cashback_percent": goods.cashback_percent if goods else None
+            "goods_cashback_percent": goods.cashback_percent if goods else None,
+            "goods_purchase_guide": goods.purchase_guide if goods else None
         }
         response_list.append(reservation_dict)
     
