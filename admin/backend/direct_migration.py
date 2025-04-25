@@ -105,6 +105,57 @@ def run_migration():
         else:
             logger.info("ℹ️ Таблица alembic_version не существует, пропускаем обновление версии")
         
+        # 5. Каскадное удаление для daily_availability.goods_id
+        logger.info("Пробуем добавить ON DELETE CASCADE для daily_availability.goods_id...")
+        # Удаляем старый внешний ключ, если есть
+        drop_fk_sql = '''
+        DO $$
+        DECLARE
+            fk_name text;
+        BEGIN
+            SELECT tc.constraint_name INTO fk_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+            WHERE tc.table_name = 'daily_availability' AND tc.constraint_type = 'FOREIGN KEY' AND kcu.column_name = 'goods_id';
+            IF fk_name IS NOT NULL THEN
+                EXECUTE format('ALTER TABLE daily_availability DROP CONSTRAINT %I', fk_name);
+            END IF;
+        END$$;
+        '''
+        execute_sql(conn, drop_fk_sql, description="Удалён старый FK daily_availability.goods_id")
+        # Добавляем новый FK с CASCADE
+        add_fk_sql = '''
+        ALTER TABLE daily_availability
+        ADD CONSTRAINT daily_availability_goods_id_fkey
+        FOREIGN KEY (goods_id) REFERENCES goods(id) ON DELETE CASCADE;
+        '''
+        execute_sql(conn, add_fk_sql, description="Добавлен FK с CASCADE для daily_availability.goods_id")
+        # 6. Каскадное удаление для reservations.goods_id
+        logger.info("Пробуем добавить ON DELETE CASCADE для reservations.goods_id...")
+        drop_fk_sql2 = '''
+        DO $$
+        DECLARE
+            fk_name text;
+        BEGIN
+            SELECT tc.constraint_name INTO fk_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+            WHERE tc.table_name = 'reservations' AND tc.constraint_type = 'FOREIGN KEY' AND kcu.column_name = 'goods_id';
+            IF fk_name IS NOT NULL THEN
+                EXECUTE format('ALTER TABLE reservations DROP CONSTRAINT %I', fk_name);
+            END IF;
+        END$$;
+        '''
+        execute_sql(conn, drop_fk_sql2, description="Удалён старый FK reservations.goods_id")
+        add_fk_sql2 = '''
+        ALTER TABLE reservations
+        ADD CONSTRAINT reservations_goods_id_fkey
+        FOREIGN KEY (goods_id) REFERENCES goods(id) ON DELETE CASCADE;
+        '''
+        execute_sql(conn, add_fk_sql2, description="Добавлен FK с CASCADE для reservations.goods_id")
+        
         # Фиксируем изменения
         conn.commit()
         logger.info("✅ Миграция успешно завершена!")

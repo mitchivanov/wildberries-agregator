@@ -107,6 +107,7 @@ class ReservationResponse(BaseModel):
     goods_image: Optional[str] = None
     goods_price: Optional[int] = None
     goods_cashback_percent: Optional[int] = None
+    goods_purchase_guide: Optional[str] = None
 
     class Config:
         from_attributes = True

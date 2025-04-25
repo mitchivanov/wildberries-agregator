@@ -12,6 +12,14 @@ services:
     networks:
       - backend-network
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - backend-network
+
   backend:
     build: ./admin/backend
     env_file:
@@ -29,9 +37,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - backend-network
       - frontend-network
+
   frontend:
     build:
       context: ./admin/frontend
@@ -67,8 +78,31 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - backend-network
+
+  notification_worker:
+    build: ./admin/backend
+    command: ["python", "notification_worker.py"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL
+      - TELEGRAM_WEBAPP_URL
+      - BOT_API_URL
+      - TELEGRAM_BOT_TOKEN
+      - SUPER_ADMIN_IDS
+      - DEVELOPMENT_MODE
+      - REDIS_URL
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - backend-network
+    restart: always
 
 volumes:
   postgres_data:
