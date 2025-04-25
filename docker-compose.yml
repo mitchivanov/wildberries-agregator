@@ -32,6 +32,7 @@ services:
       - SUPER_ADMIN_IDS
       - DEVELOPMENT_MODE
       - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./logs:/app/logs
     depends_on:
