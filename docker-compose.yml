@@ -95,7 +95,7 @@ services:
       - TELEGRAM_BOT_TOKEN
       - SUPER_ADMIN_IDS
       - DEVELOPMENT_MODE
-      - REDIS_URL
+      - REDIS_URL=redis://redis:6379/0
       - PYTHONUNBUFFERED=1
     depends_on:
       - redis
