@@ -30,11 +30,9 @@ async def is_image_url_valid(url):
         logger.warning(f"Image URL validation failed: {url}, error: {e}")
         return False
 
-async def send_notification_to_bot(notification):
+async def send_notification_to_bot(notification, allow_payload_correction=True):
     url = f"{BOT_API_URL}/send_notification"
-    # --- LOG FULL PAYLOAD ---
     logger.info(f"Sending payload to bot: {json.dumps(notification, ensure_ascii=False)}")
-    # --- Validate image URL if present ---
     goods_data = notification.get("goods_data", {})
     image_url = goods_data.get("image")
     if image_url:
@@ -42,14 +40,12 @@ async def send_notification_to_bot(notification):
         if not valid:
             logger.warning(f"Image URL is not valid, removing from payload: {image_url}")
             goods_data.pop("image", None)
-    # --- Disable web page preview for all messages ---
     notification["disable_web_page_preview"] = True
-    # --- Check for bad markdown/html (basic) ---
     text_fields = [goods_data.get("purchase_guide", ""), goods_data.get("name", "")]
     for text in text_fields:
         if re.search(r'<[^>]+>', text):
             logger.warning(f"Possible HTML in text: {text}")
-        if re.search(r'[`*_\[\]]', text):
+        if re.search(r'[`*_]', text):
             logger.warning(f"Possible markdown in text: {text}")
     try:
         async with aiohttp.ClientSession() as session:
@@ -60,7 +56,6 @@ async def send_notification_to_bot(notification):
                     if data.get("status") == "success" and data.get("delivery_confirmed", False):
                         logger.info(f"Notification delivered: {notification}")
                         return True
-                    # Flood wait обработка по содержимому ответа
                     if "flood" in text.lower() or "wait" in text.lower():
                         wait_time = data.get("retry_after") or 30
                         logger.warning(f"Flood wait from Bot API. Waiting {wait_time} seconds. Response: {data}")
@@ -68,6 +63,25 @@ async def send_notification_to_bot(notification):
                         return False
                     else:
                         logger.warning(f"Bot API error: {data}. Payload: {json.dumps(notification, ensure_ascii=False)}")
+                        # --- CORRECT PAYLOAD IF POSSIBLE ---
+                        if allow_payload_correction:
+                            corrected = False
+                            # 1. Удаляем image, если есть подозрение на web page content
+                            if goods_data.get("image") and "web page content" in str(data).lower():
+                                logger.warning("Removing image field due to web page content error and retrying...")
+                                goods_data.pop("image", None)
+                                corrected = True
+                            # 2. Удаляем markdown/html из текста
+                            for key in ["purchase_guide", "name"]:
+                                if key in goods_data:
+                                    clean = re.sub(r'<[^>]+>', '', goods_data[key])
+                                    clean = re.sub(r'[`*_\[\]]', '', clean)
+                                    if clean != goods_data[key]:
+                                        logger.warning(f"Cleaning formatting in {key} and retrying...")
+                                        goods_data[key] = clean
+                                        corrected = True
+                            if corrected:
+                                return await send_notification_to_bot(notification, allow_payload_correction=False)
                         return False
                 elif resp.status == 429:
                     retry_after = resp.headers.get("Retry-After")
