@@ -8,7 +8,7 @@ const VITE_API_URL = import.meta.env.VITE_API_URL;
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'https://lobster-civil-pigeon.ngrok-free.app/api',
+  baseURL: 'https://develooper.ru/api',
   headers: {
     'Content-Type': 'application/json',
   },
