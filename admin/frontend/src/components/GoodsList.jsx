@@ -30,27 +30,44 @@ const GoodsList = () => {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const loadGoods = useCallback(async (reset = false, customPageSize = null) => {
+    if (loading) return; // Предотвращаем множественные запросы
+    
     setLoading(true);
     setIsSearching(false);
     try {
       const limit = customPageSize !== null ? customPageSize : pageSize;
-      const data = await getGoods({ skip: reset ? 0 : skip, limit });
+      const skipValue = reset ? 0 : skip;
+      
+      console.log(`Загрузка товаров: reset=${reset}, skipValue=${skipValue}, limit=${limit}`);
+      
+      const data = await getGoods({ skip: skipValue, limit });
       if (data) {
         const items = Array.isArray(data.items) ? data.items : [];
+        console.log(`Получено ${items.length} товаров из ${data.total} всего`);
+        
         if (reset) {
           setGoods(items);
-          setSkip(items.length);
         } else {
-          setGoods(prev => [...prev, ...items]);
-          setSkip(prev => prev + items.length);
+          setGoods(prev => {
+            // Проверяем, что не добавляем дубликаты
+            const newIds = new Set(items.map(item => item.id));
+            const prevFiltered = prev.filter(item => !newIds.has(item.id));
+            return [...prevFiltered, ...items];
+          });
         }
+        
+        // Обновляем skip для следующего запроса
+        setSkip(reset ? items.length : skipValue + items.length);
+        
+        // Обновляем общее количество товаров
         setTotal(typeof data.total === 'number' ? data.total : 0);
-        if ((typeof data.total === 'number' && data.total === 0) || items.length === 0) {
-          setHasMore(false);
-        } else {
-          setHasMore((reset ? items.length : skip + items.length) < (typeof data.total === 'number' ? data.total : 0));
-        }
+        
+        // Проверяем, есть ли еще товары для загрузки
+        setHasMore(items.length > 0 && (reset ? items.length : skipValue + items.length) < data.total);
+        
+        console.log(`hasMore установлен в ${items.length > 0 && (reset ? items.length : skipValue + items.length) < data.total}`);
       }
+      
       const savedHighlightId = localStorage.getItem('highlightedGoodsId');
       if (savedHighlightId) {
         setHighlightedGoodsId(parseInt(savedHighlightId));
@@ -74,7 +91,7 @@ const GoodsList = () => {
     } finally {
       setLoading(false);
     }
-  }, [getGoods, skip, pageSize]);
+  }, [getGoods, skip, pageSize, loading]);
 
   useEffect(() => {
     loadGoods(true);
@@ -102,20 +119,40 @@ const GoodsList = () => {
 
   // Infinite scroll observer
   useEffect(() => {
-    if (!hasMore || loading) return;
-    const observer = new window.IntersectionObserver(
-      entries => {
-        if (entries[0].isIntersecting) {
-          loadGoods();
-        }
-      },
-      { threshold: 1 }
-    );
-    if (loaderRef.current) {
-      observer.observe(loaderRef.current);
-    }
+    // Создаем IntersectionObserver только если есть товары для загрузки и элемент наблюдения существует
+    if (!hasMore || !loaderRef.current) return;
+
+    // Создаем функцию обработчика пересечения
+    const handleObserver = (entries) => {
+      const [entry] = entries;
+      // Загружаем новые данные только если:
+      // 1. Элемент видим (пересекает viewport)
+      // 2. Не идет загрузка в данный момент
+      // 3. Есть еще товары для загрузки
+      if (entry.isIntersecting && !loading && hasMore) {
+        console.log('Loader element intersecting viewport, loading more goods');
+        loadGoods(false);
+      }
+    };
+
+    // Создаем observer с более низким порогом для раннего обнаружения
+    const observer = new IntersectionObserver(handleObserver, {
+      // Уменьшаем порог до 0.1 (10% видимости элемента достаточно для срабатывания)
+      threshold: 0.1,
+      // Добавляем margin для раннего срабатывания до появления на экране
+      rootMargin: '100px'
+    });
+
+    observer.observe(loaderRef.current);
+    
+    console.log('IntersectionObserver attached with hasMore =', hasMore, 'loading =', loading);
+
+    // Очистка наблюдателя при размонтировании или изменении зависимостей
     return () => {
-      if (loaderRef.current) observer.unobserve(loaderRef.current);
+      if (loaderRef.current) {
+        observer.unobserve(loaderRef.current);
+      }
+      observer.disconnect();
     };
   }, [hasMore, loading, loadGoods]);
 
@@ -562,7 +599,21 @@ const GoodsList = () => {
       </div>
 
       {/* Infinite scroll loader */}
-      <div ref={loaderRef} style={{ height: 1 }} />
+      <div 
+        ref={loaderRef} 
+        style={{ height: '50px', margin: '20px 0' }}
+        className={isDarkMode ? 'text-gray-300' : 'text-gray-500'} 
+      >
+        {loading && hasMore && (
+          <div className="text-center">
+            <svg className="animate-spin h-6 w-6 mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>Загрузка...</span>
+          </div>
+        )}
+      </div>
       {!hasMore && !loading && goods.length > 0 && (
         <div className="text-center text-sm text-gray-400 mt-4">Все товары загружены</div>
       )}
