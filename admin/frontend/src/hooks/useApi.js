@@ -82,16 +82,17 @@ export const useApi = () => {
     }
   }, []);
 
-  // Получение всех товаров, включая скрытые (для админки)
-  const getGoods = useCallback(async (includeHidden = true) => {
-    console.log('Запрос списка товаров, include_hidden:', includeHidden);
-    return request('get', `/goods/?include_hidden=${includeHidden}`);
+  // Получение всех товаров с пагинацией
+  const getGoods = useCallback(async (params = {}) => {
+    // params: { skip, limit, includeHidden }
+    const { skip = 0, limit = 100, includeHidden = true } = params;
+    return request('get', `/goods/?skip=${skip}&limit=${limit}&include_hidden=${includeHidden}`);
   }, [request]);
 
-  // Поиск товаров
-  const searchGoods = useCallback(async (query) => {
-    console.log(`Поиск товаров по запросу: ${query}`);
-    return request('get', `/goods/?search=${encodeURIComponent(query)}`);
+  // Поиск товаров с пагинацией
+  const searchGoods = useCallback(async (query, params = {}) => {
+    const { skip = 0, limit = 100 } = params;
+    return request('get', `/goods/?search=${encodeURIComponent(query)}&skip=${skip}&limit=${limit}`);
   }, [request]);
 
   // Получение товара по ID
@@ -178,48 +179,103 @@ export const useApi = () => {
 
   // Функция для получения всей доступности товаров
   const getAllAvailability = useCallback(async () => {
-    console.log('Запрос данных о доступности товаров');
-    
-    // Проверяем кэш перед запросом
-    const cacheKey = '/availability/';
-    if (queryCache.has(cacheKey)) {
-      console.log('Возвращаем кэшированные данные о доступности');
-      return queryCache.get(cacheKey);
-    }
+    console.log('⭐ Запрос данных о доступности товаров');
     
     try {
+      console.log('⭐ Отправляем запрос к бэкенду');
       const response = await api.get('/availability/');
-      
-      // Дополнительный запрос для получения информации о товарах
-      const goodsResponse = await api.get('/goods/');
-      const goodsMap = {};
-      
-      // Создаем карту товаров по ID для быстрого доступа
-      if (goodsResponse.data) {
-        goodsResponse.data.forEach(goods => {
-          goodsMap[goods.id] = {
-            name: goods.name,
-            article: goods.article
-          };
-        });
+      console.log('⭐ Ответ от бэкенда:', response);
+      console.log('⭐ Ответ.data:', response.data, 'Тип:', typeof response.data, 'Array?', Array.isArray(response.data));
+
+      // ЗАЩИТА ОТ НЕКОРРЕКТНЫХ ДАННЫХ
+      let availabilityData = [];
+      if (Array.isArray(response.data)) {
+        availabilityData = response.data;
+      } else if (response.data && Array.isArray(response.data.data)) {
+        // Если пришёл объект с полем data, которое является массивом
+        availabilityData = response.data.data;
+      } else if (response.data && typeof response.data === 'object') {
+        // Крайний случай - объект без data, но с другими полями
+        console.warn('⭐ Некорректная структура данных от бэкенда, пытаемся преобразовать');
+        try {
+          availabilityData = Object.values(response.data).filter(item => typeof item === 'object');
+        } catch (dataError) {
+          console.error('⭐ Не удалось преобразовать данные', dataError);
+        }
       }
       
-      // Добавляем информацию о товарах к данным о доступности
-      const enrichedData = response.data.map(item => ({
-        ...item,
-        goods_name: goodsMap[item.goods_id]?.name || null,
-        goods_article: goodsMap[item.goods_id]?.article || null
-      }));
+      console.log('⭐ Нормализованные данные доступности:', availabilityData);
       
-      // Сохраняем в кэш
-      queryCache.set(cacheKey, enrichedData);
+      // Данные о товарах обрабатываем безопасно
+      let goodsMap = {};
+      try {
+        console.log('⭐ Запрашиваем данные о товарах');
+        const goodsResponse = await api.get('/goods/');
+        console.log('⭐ Ответ товаров:', goodsResponse.data);
+        
+        if (goodsResponse.data && goodsResponse.data.items && Array.isArray(goodsResponse.data.items)) {
+          console.log('⭐ Корректные данные о товарах');
+          goodsResponse.data.items.forEach(goods => {
+            try {
+              if (goods && goods.id) {
+                goodsMap[goods.id] = {
+                  name: goods.name || 'Без названия',
+                  article: goods.article || 'Нет артикула'
+                };
+              }
+            } catch (itemError) {
+              console.error('⭐ Ошибка при обработке товара:', itemError);
+            }
+          });
+        } else if (goodsResponse.data && Array.isArray(goodsResponse.data)) {
+          console.log('⭐ Данные о товарах в виде массива');
+          goodsResponse.data.forEach(goods => {
+            try {
+              if (goods && goods.id) {
+                goodsMap[goods.id] = {
+                  name: goods.name || 'Без названия',
+                  article: goods.article || 'Нет артикула'
+                };
+              }
+            } catch (itemError) {
+              console.error('⭐ Ошибка при обработке товара:', itemError);
+            }
+          });
+        } else {
+          console.warn('⭐ Некорректная структура данных о товарах');
+        }
+      } catch (goodsError) {
+        console.error('⭐ Ошибка при получении данных о товарах:', goodsError);
+      }
       
+      console.log('⭐ Карта товаров:', goodsMap);
+      
+      // Безопасно обогащаем данные
+      let enrichedData = [];
+      try {
+        enrichedData = availabilityData.map(item => {
+          try {
+            return {
+              ...item,
+              goods_name: item && item.goods_id ? (goodsMap[item.goods_id]?.name || null) : null,
+              goods_article: item && item.goods_id ? (goodsMap[item.goods_id]?.article || null) : null
+            };
+          } catch (enrichError) {
+            console.error('⭐ Ошибка при обогащении элемента:', enrichError, item);
+            return item;
+          }
+        });
+      } catch (mapError) {
+        console.error('⭐ Общая ошибка при обогащении данных:', mapError);
+        enrichedData = availabilityData;
+      }
+      
+      console.log('⭐ Итоговые данные:', enrichedData);
       return enrichedData;
     } catch (error) {
-      const errorMessage = error.response?.data?.detail || error.message;
-      console.error('Ошибка при получении данных о доступности:', errorMessage);
-      toast.error(`Ошибка: ${errorMessage}`);
-      throw error;
+      console.error('⭐ КРИТИЧЕСКАЯ ОШИБКА В getAllAvailability:', error);
+      toast.error(`Ошибка при получении данных о доступности: ${error.message}`);
+      return []; // Всегда возвращаем массив, даже в случае ошибки
     }
   }, []);
 

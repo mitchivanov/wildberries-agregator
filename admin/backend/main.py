@@ -87,6 +87,9 @@ _availability_cache_ttl = 10  # Время жизни кэша в секунда
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 
+REDIS_RETRIES = 5  # Количество попыток при ошибке Redis
+REDIS_RETRY_DELAY = 5  # Базовая задержка между попытками (сек)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -267,46 +270,107 @@ async def create_goods(goods: GoodsCreate, db: AsyncSession = Depends(get_db)):
     
     return goods_dict
 
-@app.get("/goods/", response_model=List[GoodsResponse], dependencies=[Depends(verify_telegram_user)])
+@app.get("/goods/", response_model=dict, dependencies=[Depends(verify_telegram_user)])
 async def read_goods(
     search: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
-    include_hidden: bool = False  # По умолчанию скрытые товары не включаются
+    include_hidden: bool = False
 ):
-    """Получить список всех товаров с фильтрацией"""
+    """Получить список всех товаров с фильтрацией и пагинацией"""
     try:
-        logger.info(f"Запрос товаров: search={search}, include_hidden={include_hidden}")
-        
-        query = select(Goods).options(
-            selectinload(Goods.daily_availability),
-            selectinload(Goods.category),
-            selectinload(Goods.reservations)  # Добавляем загрузку резерваций
-        )
-
+        logger.info(f"Запрос товаров: search={search}, include_hidden={include_hidden}, skip={skip}, limit={limit}")
+        base_query = select(Goods)
         # Применяем поиск, если указан
         if search:
             search_pattern = f"%{search}%"
-            query = query.where(
+            base_query = base_query.where(
                 or_(
                     Goods.name.ilike(search_pattern),
                     Goods.article.ilike(search_pattern)
                 )
             )
-
         # Фильтруем скрытые товары только если include_hidden=False
         if not include_hidden:
-            query = query.where(Goods.is_hidden == False)
-
-        # Применяем пагинацию
-        query = query.offset(skip).limit(limit)
-        
+            base_query = base_query.where(Goods.is_hidden == False)
+        # Считаем total
+        count_query = base_query.with_only_columns(func.count()).order_by(None)
+        total = (await db.execute(count_query)).scalar()
+        # Применяем пагинацию и загрузку связей
+        query = base_query.options(
+            selectinload(Goods.daily_availability),
+            selectinload(Goods.category),
+            selectinload(Goods.reservations)
+        ).offset(skip).limit(limit)
         result = await db.execute(query)
-        goods = result.scalars().all()
+        goods_list = result.scalars().all()
+        logger.info(f"Найдено товаров: {len(goods_list)} из total={total}")
         
-        logger.info(f"Найдено товаров: {len(goods)}")
-        return goods
+        # Преобразуем модели в словари для избежания ошибки сериализации
+        goods_items = []
+        for goods in goods_list:
+            # Получаем доступность товара
+            availability = goods.daily_availability
+            
+            # Получаем информацию о категории
+            category = goods.category
+            
+            # Создаем словарь для товара
+            goods_dict = {
+                "id": goods.id,
+                "name": goods.name,
+                "price": goods.price,
+                "cashback_percent": goods.cashback_percent,
+                "article": goods.article,
+                "url": goods.url,
+                "image": goods.image,
+                "is_active": goods.is_active,
+                "is_hidden": goods.is_hidden,
+                "purchase_guide": goods.purchase_guide,
+                "start_date": goods.start_date,
+                "end_date": goods.end_date,
+                "min_daily": goods.min_daily,
+                "max_daily": goods.max_daily,
+                "created_at": goods.created_at,
+                "updated_at": goods.updated_at,
+                "daily_availability": [
+                    {
+                        "id": item.id,
+                        "goods_id": item.goods_id,
+                        "date": item.date,
+                        "available_quantity": item.available_quantity,
+                        "goods_name": goods.name
+                    }
+                    for item in availability
+                ],
+                "reservations": [
+                    {
+                        "id": item.id,
+                        "user_id": item.user_id,
+                        "goods_id": item.goods_id,
+                        "quantity": item.quantity,
+                        "reserved_at": item.reserved_at,
+                        "goods_name": goods.name,
+                        "goods_image": goods.image,
+                        "goods_price": goods.price,
+                        "goods_cashback_percent": goods.cashback_percent,
+                        "goods_purchase_guide": goods.purchase_guide
+                    }
+                    for item in goods.reservations
+                ],
+                "category": {
+                    "id": category.id,
+                    "name": category.name,
+                    "description": category.description,
+                    "is_active": category.is_active,
+                    "created_at": category.created_at,
+                    "updated_at": category.updated_at
+                } if category else None
+            }
+            goods_items.append(goods_dict)
+            
+        return {"items": goods_items, "total": total}
     except Exception as e:
         logger.error(f"Ошибка при получении списка товаров: {str(e)}")
         raise HTTPException(
@@ -629,6 +693,20 @@ async def get_goods_details(
     return goods
 
 # Функция для отправки уведомления в бот
+async def redis_with_retries(method, *args, **kwargs):
+    for attempt in range(1, REDIS_RETRIES + 1):
+        try:
+            return await method(*args, **kwargs)
+        except Exception as e:
+            delay = REDIS_RETRY_DELAY * (2 ** (attempt - 1))
+            logger.error(f"Redis error on {method.__name__}, attempt {attempt}/{REDIS_RETRIES}: {e}")
+            if attempt < REDIS_RETRIES:
+                logger.warning(f"Retrying Redis operation {method.__name__} after {delay} seconds...")
+                await asyncio.sleep(delay)
+            else:
+                logger.critical(f"Redis operation {method.__name__} failed after {REDIS_RETRIES} attempts.")
+                raise
+
 async def push_notification_to_queue(user_id, goods_data, quantity, reservation_id=None):
     """Кладёт уведомление о бронировании в очередь Redis"""
     notification = {
@@ -640,7 +718,7 @@ async def push_notification_to_queue(user_id, goods_data, quantity, reservation_
     }
     try:
         logger.info(f"Пробуем положить уведомление в очередь Redis: {notification}")
-        await redis_client.rpush("notifications", json.dumps(notification))
+        await redis_with_retries(redis_client.rpush, "notifications", json.dumps(notification))
         logger.info(f"Уведомление успешно добавлено в очередь Redis для user_id={user_id}, goods_id={goods_data.get('id')}, reservation_id={reservation_id}")
     except Exception as e:
         logger.error(f"Ошибка при добавлении уведомления в очередь Redis: {str(e)}")
@@ -963,15 +1041,23 @@ async def parse_wildberries(request_data: dict):
     """Парсит данные о товаре с Wildberries по URL"""
     url = request_data.get("url")
     if not url:
+        logger.warning("Попытка парсинга без указания URL")
         raise HTTPException(status_code=400, detail="URL не указан")
+    
+    logger.info(f"Запрос на парсинг URL: {url}")
+    logger.debug(f"Детальная отладка - запрос на парсинг URL: {url}")
     
     try:
         # Используем функцию из parser.py
+        logger.debug("Вызов функции parse_wildberries_url")
         result = await parse_wildberries_url(url)
         
         if not result:
+            logger.error(f"Парсинг URL {url} не вернул результатов")
             raise HTTPException(status_code=404, detail="Не удалось получить информацию о товаре")
             
+        logger.info(f"Успешный парсинг товара: {result.get('name', 'Без имени')} [арт. {result.get('article', 'Без артикула')}]")
+        logger.debug(f"Детальный результат парсинга: {result}")
         return result
         
     except Exception as e:

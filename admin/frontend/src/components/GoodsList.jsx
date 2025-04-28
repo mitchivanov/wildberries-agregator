@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useTelegram } from '../hooks/useTelegram';
@@ -6,30 +6,51 @@ import GoodsItem from './GoodsItem';
 import SearchBar from './SearchBar';
 import toast from 'react-hot-toast';
 
+const DEFAULT_PAGE_SIZE = 100;
+const PAGE_SIZE_OPTIONS = [10, 50, 100, 200, 500];
+
 const GoodsList = () => {
   const { getGoods, searchGoods, deleteGoods, bulkHideGoods, bulkShowGoods } = useApi();
   const { isDarkMode, webApp } = useTelegram();
   const navigate = useNavigate();
 
   const [goods, setGoods] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [skip, setSkip] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
   const [highlightedGoodsId, setHighlightedGoodsId] = useState(null);
   
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-
   const [selectedGoods, setSelectedGoods] = useState(new Set());
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
-  const loadGoods = async () => {
+  const loaderRef = useRef(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+
+  const loadGoods = useCallback(async (reset = false, customPageSize = null) => {
     setLoading(true);
     setIsSearching(false);
     try {
-      const data = await getGoods();
-      if (data) setGoods(data);
-
+      const limit = customPageSize !== null ? customPageSize : pageSize;
+      const data = await getGoods({ skip: reset ? 0 : skip, limit });
+      if (data) {
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (reset) {
+          setGoods(items);
+          setSkip(items.length);
+        } else {
+          setGoods(prev => [...prev, ...items]);
+          setSkip(prev => prev + items.length);
+        }
+        setTotal(typeof data.total === 'number' ? data.total : 0);
+        if ((typeof data.total === 'number' && data.total === 0) || items.length === 0) {
+          setHasMore(false);
+        } else {
+          setHasMore((reset ? items.length : skip + items.length) < (typeof data.total === 'number' ? data.total : 0));
+        }
+      }
       const savedHighlightId = localStorage.getItem('highlightedGoodsId');
       if (savedHighlightId) {
         setHighlightedGoodsId(parseInt(savedHighlightId));
@@ -53,10 +74,10 @@ const GoodsList = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getGoods, skip, pageSize]);
 
   useEffect(() => {
-    loadGoods();
+    loadGoods(true);
 
     if (webApp) {
       webApp.MainButton.setParams({
@@ -79,16 +100,48 @@ const GoodsList = () => {
     }
   }, [webApp, navigate]);
 
+  // Infinite scroll observer
+  useEffect(() => {
+    if (!hasMore || loading) return;
+    const observer = new window.IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting) {
+          loadGoods();
+        }
+      },
+      { threshold: 1 }
+    );
+    if (loaderRef.current) {
+      observer.observe(loaderRef.current);
+    }
+    return () => {
+      if (loaderRef.current) observer.unobserve(loaderRef.current);
+    };
+  }, [hasMore, loading, loadGoods]);
+
   const handleSearch = async (query) => {
     if (!query.trim()) {
-      return loadGoods();
+      setSkip(0);
+      setGoods([]);
+      setTotal(0);
+      setHasMore(true);
+      return loadGoods(true);
     }
-
     setLoading(true);
     setIsSearching(true);
+    setSkip(0);
+    setGoods([]);
+    setTotal(0);
+    setHasMore(true);
     try {
-      const data = await searchGoods(query);
-      if (data) setGoods(data);
+      const data = await searchGoods(query, { skip: 0, limit: pageSize });
+      if (data) {
+        const items = Array.isArray(data.items) ? data.items : [];
+        setGoods(items);
+        setTotal(typeof data.total === 'number' ? data.total : 0);
+        setSkip(items.length);
+        setHasMore(items.length < (typeof data.total === 'number' ? data.total : 0));
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -104,15 +157,6 @@ const GoodsList = () => {
     } catch (err) {
       toast.error(`Ошибка при удалении: ${err.message}`);
     }
-  };
-
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = goods.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(goods.length / itemsPerPage);
-
-  const handlePageChange = (pageNumber) => {
-    setCurrentPage(pageNumber);
   };
 
   const sortData = (data) => {
@@ -169,7 +213,7 @@ const GoodsList = () => {
     );
   };
 
-  const sortedGoods = useMemo(() => sortData(currentItems), [currentItems, sortConfig]);
+  const sortedGoods = useMemo(() => sortData(goods), [goods, sortConfig]);
 
   const themeClasses = isDarkMode
     ? 'bg-gray-800 border-gray-700 text-white'
@@ -207,7 +251,7 @@ const GoodsList = () => {
       console.log("Типы ID:", goodsIdsArray.map(id => typeof id));
       
       await bulkHideGoods(goodsIdsArray);
-      await loadGoods();
+      await loadGoods(true);
     } catch (err) {
       console.error("Ошибка при скрытии товаров:", err);
       toast.error(`Ошибка: ${err.message}`);
@@ -226,7 +270,7 @@ const GoodsList = () => {
       console.log("Типы ID:", goodsIdsArray.map(id => typeof id));
       
       await bulkShowGoods(goodsIdsArray);
-      await loadGoods();
+      await loadGoods(true);
     } catch (err) {
       console.error("Ошибка при показе товаров:", err);
       toast.error(`Ошибка: ${err.message}`);
@@ -259,26 +303,33 @@ const GoodsList = () => {
     });
   };
 
+  // При смене pageSize сбрасываем пагинацию и подгружаем новые данные
+  const handlePageSizeChange = (e) => {
+    const newSize = Number(e.target.value);
+    setPageSize(newSize);
+    setSkip(0);
+    setTotal(0);
+    setGoods([]);
+    loadGoods(true, newSize);
+  };
+
   return (
     <div className="px-1 sm:px-2 lg:px-4">
       <div className="flex flex-col sm:flex-row justify-between items-center mb-4 space-y-2 sm:space-y-0">
         <SearchBar onSearch={handleSearch} />
         <div className="flex items-center space-x-4">
           <select
-            value={itemsPerPage}
-            onChange={(e) => {
-              setItemsPerPage(Number(e.target.value));
-              setCurrentPage(1);
-            }}
+            value={pageSize}
+            onChange={handlePageSizeChange}
             className={`rounded-md border ${
               isDarkMode 
                 ? 'bg-gray-700 border-gray-600 text-white' 
                 : 'bg-white border-gray-300 text-gray-900'
             } px-3 py-1`}
           >
-            <option value={10}>10 на странице</option>
-            <option value={50}>50 на странице</option>
-            <option value={100}>100 на странице</option>
+            {PAGE_SIZE_OPTIONS.map(opt => (
+              <option key={opt} value={opt}>{opt} на странице</option>
+            ))}
           </select>
           <Link
             to="/admin/goods/create"
@@ -324,6 +375,22 @@ const GoodsList = () => {
               <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка...</p>
             </div>
           ) : goods.length === 0 ? (
+            <div className={`text-center py-10 rounded-lg shadow ${themeClasses}`}>
+              <p>
+                {isSearching
+                  ? 'По вашему запросу ничего не найдено'
+                  : 'Список товаров пуст'}
+              </p>
+              {isSearching && (
+                <button
+                  onClick={loadGoods}
+                  className="mt-2 btn btn-secondary"
+                >
+                  Вернуться к полному списку
+                </button>
+              )}
+            </div>
+          ) : !Array.isArray(goods) || goods.length === 0 ? (
             <div className={`text-center py-10 rounded-lg shadow ${themeClasses}`}>
               <p>
                 {isSearching
@@ -494,31 +561,10 @@ const GoodsList = () => {
         </div>
       </div>
 
-      {!loading && goods.length > 0 && (
-        <div className="flex justify-between items-center mt-4 px-4">
-          <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-            Показано {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, goods.length)} из {goods.length}
-          </div>
-          <div className="flex space-x-2">
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((number) => (
-              <button
-                key={number}
-                onClick={() => handlePageChange(number)}
-                className={`px-3 py-1 rounded-md ${
-                  currentPage === number
-                    ? isDarkMode
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-blue-500 text-white'
-                    : isDarkMode
-                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {number}
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Infinite scroll loader */}
+      <div ref={loaderRef} style={{ height: 1 }} />
+      {!hasMore && !loading && goods.length > 0 && (
+        <div className="text-center text-sm text-gray-400 mt-4">Все товары загружены</div>
       )}
     </div>
   );

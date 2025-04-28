@@ -19,7 +19,9 @@ BOT_API_URL = os.getenv("BOT_API_URL", "http://bot:8080")
 QUEUE_NAME = "notifications"
 DLQ_NAME = "notifications_dlq"
 MAX_RETRIES = 5
-RETRY_DELAY = 2  # секунд между попытками
+RETRY_DELAY = 5  # секунд между попытками
+REDIS_RETRIES = 5  # Количество попыток при ошибке Redis
+REDIS_RETRY_DELAY = 5  # Базовая задержка между попытками (сек)
 
 async def is_image_url_valid(url):
     try:
@@ -96,13 +98,27 @@ async def send_notification_to_bot(notification, allow_payload_correction=True):
         logger.error(f"Exception while sending notification: {e}. Payload: {json.dumps(notification, ensure_ascii=False)}")
         return False
 
+async def redis_with_retries(method, *args, **kwargs):
+    for attempt in range(1, REDIS_RETRIES + 1):
+        try:
+            return await method(*args, **kwargs)
+        except Exception as e:
+            delay = REDIS_RETRY_DELAY * (2 ** (attempt - 1))
+            logger.error(f"Redis error on {method.__name__}, attempt {attempt}/{REDIS_RETRIES}: {e}")
+            if attempt < REDIS_RETRIES:
+                logger.warning(f"Retrying Redis operation {method.__name__} after {delay} seconds...")
+                await asyncio.sleep(delay)
+            else:
+                logger.critical(f"Redis operation {method.__name__} failed after {REDIS_RETRIES} attempts.")
+                raise
+
 async def process_notification(redis_client, raw_notification):
     try:
         notification = json.loads(raw_notification)
         reservation_id = notification.get("reservation_id")
         if reservation_id:
             sent_key = f"sent_reservation:{reservation_id}"
-            already_sent = await redis_client.get(sent_key)
+            already_sent = await redis_with_retries(redis_client.get, sent_key)
             if already_sent:
                 logger.warning(f"Уведомление с reservation_id={reservation_id} уже отправлялось, пропускаем.")
                 return
@@ -112,22 +128,22 @@ async def process_notification(redis_client, raw_notification):
         if success:
             logger.info(f"Уведомление отправлено и удалено из очереди: {notification}")
             if reservation_id:
-                await redis_client.set(f"sent_reservation:{reservation_id}", "1", ex=60*60*24)  # 1 день TTL
+                await redis_with_retries(redis_client.set, f"sent_reservation:{reservation_id}", "1", ex=60*60*24)
         else:
             if retries + 1 >= MAX_RETRIES:
                 logger.error(f"Достигнут лимит попыток, переносим в DLQ: {notification}")
                 notification["failed_at"] = datetime.utcnow().isoformat()
-                await redis_client.rpush(DLQ_NAME, json.dumps(notification))
+                await redis_with_retries(redis_client.rpush, DLQ_NAME, json.dumps(notification))
             else:
                 notification["retries"] = retries + 1
                 logger.warning(f"Повторная попытка отправки через {RETRY_DELAY} сек. Попытка {notification['retries']}/{MAX_RETRIES}")
                 await asyncio.sleep(RETRY_DELAY)
-                await redis_client.rpush(QUEUE_NAME, json.dumps(notification))
+                await redis_with_retries(redis_client.rpush, QUEUE_NAME, json.dumps(notification))
     except Exception as e:
         logger.error(f"Ошибка обработки уведомления: {e}")
         # В случае критической ошибки тоже отправляем в DLQ
         try:
-            await redis_client.rpush(DLQ_NAME, raw_notification)
+            await redis_with_retries(redis_client.rpush, DLQ_NAME, raw_notification)
         except Exception as e2:
             logger.critical(f"Ошибка при переносе в DLQ: {e2}")
 
@@ -136,7 +152,7 @@ async def notification_worker():
     logger.info("Воркер уведомлений запущен. Ожидание новых задач...")
     while True:
         try:
-            raw_notification = await redis_client.lpop(QUEUE_NAME)
+            raw_notification = await redis_with_retries(redis_client.lpop, QUEUE_NAME)
             if raw_notification:
                 await process_notification(redis_client, raw_notification)
             else:

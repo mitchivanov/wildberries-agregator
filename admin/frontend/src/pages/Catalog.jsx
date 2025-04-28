@@ -30,7 +30,7 @@ const Catalog = () => {
       setLoading(true);
       try {
         const data = await getCategories();
-        if (data) setCategories(data);
+        setCategories(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error('Ошибка при загрузке категорий:', err);
       } finally {
@@ -46,34 +46,34 @@ const Catalog = () => {
     setIsSearching(false);
     try {
       const data = await getGoods();
-      if (data) {
-        // Фильтруем активные и не скрытые товары
-        const availableGoods = Array.isArray(data) 
-          ? data.filter(item => item.is_active && !item.is_hidden) 
-          : [];
-        setGoods(availableGoods);
-        
-        // Получаем данные о доступности для всех доступных товаров на сегодня
-        const today = new Date().toISOString().split('T')[0];
-        const availabilityMap = {};
-        
-        if (Array.isArray(availableGoods) && availableGoods.length > 0) {
-          availableGoods.forEach(item => {
-            if (item.daily_availability && item.daily_availability.length > 0) {
-              const todayAvailability = item.daily_availability.find(av => 
-                av.date.split('T')[0] === today
-              );
-              availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
-            } else {
-              availabilityMap[item.id] = 0;
-            }
-          });
-          
-          setAvailabilityData(availabilityMap);
-          
-          if (data.length > 0 && availableGoods.length === 0) {
-            toast.info('В настоящее время нет доступных товаров');
+      let availableGoods = [];
+      if (Array.isArray(data)) {
+        availableGoods = data.filter(item => item.is_active && !item.is_hidden);
+      } else if (data && Array.isArray(data.items)) {
+        availableGoods = data.items.filter(item => item.is_active && !item.is_hidden);
+      }
+      setGoods(availableGoods);
+      
+      // Получаем данные о доступности для всех доступных товаров на сегодня
+      const today = new Date().toISOString().split('T')[0];
+      const availabilityMap = {};
+      
+      if (Array.isArray(availableGoods) && availableGoods.length > 0) {
+        availableGoods.forEach(item => {
+          if (Array.isArray(item.daily_availability) && item.daily_availability.length > 0) {
+            const todayAvailability = item.daily_availability.find(av => 
+              av.date && av.date.split('T')[0] === today
+            );
+            availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
+          } else {
+            availabilityMap[item.id] = 0;
           }
+        });
+        
+        setAvailabilityData(availabilityMap);
+        
+        if (((Array.isArray(data) && data.length > 0) || (data && Array.isArray(data.items) && data.items.length > 0)) && availableGoods.length === 0) {
+          toast.info('В настоящее время нет доступных товаров');
         }
       }
     } catch (err) {
@@ -95,10 +95,12 @@ const Catalog = () => {
       const data = await searchGoods(query);
       console.log('Результаты поиска:', data);
       
-      // Фильтруем активные и не скрытые товары
-      const availableGoods = Array.isArray(data) 
-        ? data.filter(item => item.is_active && !item.is_hidden) 
-        : [];
+      let availableGoods = [];
+      if (Array.isArray(data)) {
+        availableGoods = data.filter(item => item.is_active && !item.is_hidden);
+      } else if (data && Array.isArray(data.items)) {
+        availableGoods = data.items.filter(item => item.is_active && !item.is_hidden);
+      }
       setGoods(availableGoods);
       
       // Получаем данные о доступности
@@ -107,9 +109,9 @@ const Catalog = () => {
       
       if (Array.isArray(availableGoods) && availableGoods.length > 0) {
         availableGoods.forEach(item => {
-          if (item.daily_availability && item.daily_availability.length > 0) {
+          if (Array.isArray(item.daily_availability) && item.daily_availability.length > 0) {
             const todayAvailability = item.daily_availability.find(av => 
-              av.date.split('T')[0] === today
+              av.date && av.date.split('T')[0] === today
             );
             availabilityMap[item.id] = todayAvailability ? todayAvailability.available_quantity : 0;
           } else {
@@ -208,7 +210,7 @@ const Catalog = () => {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
             </div>
-          ) : categories.length === 0 ? (
+          ) : categories?.length === 0 ? (
             <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
               Нет доступных категорий
             </p>
@@ -265,7 +267,7 @@ const Catalog = () => {
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
             <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка...</p>
           </div>
-        ) : goods.length === 0 ? (
+        ) : goods?.length === 0 ? (
           <div className={`text-center py-10 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow`}>
             <p className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
               {isSearching 

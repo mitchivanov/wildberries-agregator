@@ -9,12 +9,12 @@ done
 echo "Database is up and running!"
 
 # Запускаем прямую миграцию
-echo "Running direct migration..."
-python direct_migration.py 
-if [ $? -ne 0 ]; then
-  echo "Migration failed! Exiting..."
-  exit 1
-fi
+# echo "Running direct migration..."
+# python direct_migration.py 
+# if [ $? -ne 0 ]; then
+#   echo "Migration failed! Exiting..."
+#   exit 1
+# fi
 
 # Запускаем воркер активности товаров в фоновом режиме
 echo "Starting worker..."

@@ -9,7 +9,7 @@ import GoodsAvailability from '../components/GoodsAvailability';
 const EditGoods = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getGoodsById, updateGoods, getCategories } = useApi();
+  const { getGoodsById, updateGoods, getCategories, parseWildberriesUrl } = useApi();
   const { isDarkMode } = useTelegram();
   
   const [goods, setGoods] = useState(null);
@@ -17,6 +17,7 @@ const EditGoods = () => {
   const [error, setError] = useState(null);
   const [showAvailability, setShowAvailability] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [parsing, setParsing] = useState(false);
   
   // Состояние формы
   const [form, setForm] = useState({
@@ -258,14 +259,58 @@ const EditGoods = () => {
               <label className={`block text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                 URL товара
               </label>
-              <input
-                type="url"
-                name="url"
-                value={form.url}
-                onChange={handleChange}
-                className={inputClass}
-                required
-              />
+              <div className="flex gap-2 items-center">
+                <input
+                  type="url"
+                  name="url"
+                  value={form.url}
+                  onChange={handleChange}
+                  className={inputClass}
+                  required
+                />
+                <button
+                  type="button"
+                  className={`px-3 py-2 rounded ${isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800'} flex items-center`}
+                  onClick={async () => {
+                    if (!form.url) {
+                      toast.error('Введите URL товара');
+                      return;
+                    }
+                    setParsing(true);
+                    try {
+                      const result = await parseWildberriesUrl(form.url);
+                      if (result && !result.error) {
+                        setForm(prev => ({
+                          ...prev,
+                          name: result.name || prev.name,
+                          article: result.article || prev.article,
+                          price: result.price || prev.price,
+                          image: result.image || prev.image,
+                          url: result.url || prev.url,
+                        }));
+                        toast.success('Данные успешно обновлены с сайта');
+                      } else {
+                        toast.error(result?.message || 'Не удалось получить данные с сайта');
+                      }
+                    } catch (e) {
+                      toast.error('Ошибка при парсинге товара');
+                    } finally {
+                      setParsing(false);
+                    }
+                  }}
+                  disabled={parsing}
+                  title="Обновить данные с сайта"
+                >
+                  {parsing ? (
+                    <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  ) : (
+                    <span>Обновить с сайта</span>
+                  )}
+                </button>
+              </div>
             </div>
             
             {/* URL изображения */}

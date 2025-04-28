@@ -15,9 +15,16 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    command: ["sh", "-c", "redis-server & sleep 2 && redis-cli replicaof no one && wait"]
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - backend-network
 
@@ -102,6 +109,19 @@ services:
     depends_on:
       - redis
       - backend
+    networks:
+      - backend-network
+    restart: always
+
+  redis-selfheal:
+    build: ./admin/redis-selfheal
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CHECK_INTERVAL=60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./logs:/logs
     networks:
       - backend-network
     restart: always
