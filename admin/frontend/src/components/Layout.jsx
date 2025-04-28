@@ -78,6 +78,24 @@ const Layout = ({ children }) => {
                 >
                   Товары
                 </Link>
+                <Link
+                  to="/admin/categories"
+                  className={navLinkClass('/admin/categories')}
+                >
+                  Категории
+                </Link>
+                <Link
+                  to="/admin/reservations"
+                  className={navLinkClass('/admin/reservations')}
+                >
+                  Бронирования
+                </Link>
+                <Link
+                  to="/admin/availability"
+                  className={navLinkClass('/admin/availability')}
+                >
+                  Доступность
+                </Link>
               </nav>
             </div>
             <div className="flex items-center">

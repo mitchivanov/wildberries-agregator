@@ -41,6 +41,20 @@ const Dashboard = () => {
               Добавление, редактирование и удаление товаров
             </p>
           </Link>
+          
+          <Link 
+            to="/admin/categories" 
+            className={`p-6 rounded-lg shadow hover:shadow-md transition ${
+              isDarkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-50'
+            }`}
+          >
+            <h2 className={`text-xl font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
+              Управление категориями
+            </h2>
+            <p className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
+              Добавление, редактирование и удаление категорий товаров
+            </p>
+          </Link>
         </div>
 
         <div className={`p-6 rounded-lg shadow ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
@@ -59,6 +73,16 @@ const Dashboard = () => {
               Добавить новый товар
             </Link>
             <Link 
+              to="/admin/categories/create" 
+              className={`block w-full text-center py-2 px-4 rounded ${
+                isDarkMode 
+                  ? 'bg-green-700 text-white hover:bg-green-600' 
+                  : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              Добавить новую категорию
+            </Link>
+            <Link 
               to="/admin/goods" 
               className={`block w-full text-center py-2 px-4 rounded ${
                 isDarkMode 
@@ -67,6 +91,16 @@ const Dashboard = () => {
               }`}
             >
               Просмотреть все товары
+            </Link>
+            <Link 
+              to="/admin/categories" 
+              className={`block w-full text-center py-2 px-4 rounded ${
+                isDarkMode 
+                  ? 'bg-gray-700 text-white hover:bg-gray-600' 
+                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+              }`}
+            >
+              Просмотреть все категории
             </Link>
           </div>
         </div>

@@ -1,8 +1,13 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 
-// Эти данные должны быть в .env файле в реальном проекте
-const ADMIN_LOGIN = 'admin';
-const ADMIN_PASSWORD = 'password123';
+// Получаем переменные с правильным префиксом VITE_ для Vite.js
+const ADMIN_LOGIN = 'admin'
+const ADMIN_PASSWORD = 'password123'
+
+// Добавим отладочный вывод
+console.log('Переменные аутентификации загружены:');
+console.log('ADMIN_LOGIN доступен:', !!ADMIN_LOGIN, ADMIN_LOGIN);  // Добавим сам логин для отладки
+console.log('ADMIN_PASSWORD доступен:', !!ADMIN_PASSWORD, ADMIN_PASSWORD); // Добавим сам пароль для отладки
 
 const AuthContext = createContext();
 
@@ -18,11 +23,19 @@ export const AuthProvider = ({ children }) => {
   }, []);
   
   const login = (username, password) => {
-    if (username === ADMIN_LOGIN && password === ADMIN_PASSWORD) {
+    console.log('Попытка входа:', username);
+    console.log('Ожидаемый логин:', ADMIN_LOGIN);
+    console.log('Введенный пароль совпадает с ожидаемым:', password === ADMIN_PASSWORD);
+    
+    // Сравниваем строковые представления для надежности
+    if (String(username) === String(ADMIN_LOGIN) && String(password) === String(ADMIN_PASSWORD)) {
       setIsAuthenticated(true);
       localStorage.setItem('isAuthenticated', 'true');
       return true;
     }
+    
+    // Если учетные данные не подошли, выводим сообщение
+    console.error('Неверные учетные данные');
     return false;
   };
   

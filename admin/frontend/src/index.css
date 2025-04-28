@@ -88,4 +88,20 @@
   }
 }
 
+@keyframes highlight-pulse {
+  0% { 
+    background-color: rgba(59, 130, 246, 0.3); 
+  }
+  50% { 
+    background-color: rgba(59, 130, 246, 0.5); 
+  }
+  100% { 
+    background-color: rgba(59, 130, 246, 0.3); 
+  }
+}
+
+.highlight-animation {
+  animation: highlight-pulse 1s ease-in-out 2;
+}
+
 /* Удалите или закомментируйте дефолтные стили Vite, если они конфликтуют с Tailwind */
