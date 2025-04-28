@@ -86,7 +86,20 @@ export const useApi = () => {
   const getGoods = useCallback(async (params = {}) => {
     // params: { skip, limit, includeHidden }
     const { skip = 0, limit = 100, includeHidden = true } = params;
-    return request('get', `/goods/?skip=${skip}&limit=${limit}&include_hidden=${includeHidden}`);
+    
+    // Добавляем логирование для отладки
+    console.log(`Запрос товаров: skip=${skip}, limit=${limit}, includeHidden=${includeHidden}`);
+    
+    // Используем URLSearchParams для правильного форматирования параметров запроса
+    const searchParams = new URLSearchParams();
+    searchParams.append('skip', skip);
+    searchParams.append('limit', limit);
+    searchParams.append('include_hidden', includeHidden);
+    
+    const url = `/goods/?${searchParams.toString()}`;
+    console.log(`URL запроса: ${url}`);
+    
+    return request('get', url);
   }, [request]);
 
   // Поиск товаров с пагинацией
