@@ -2,10 +2,20 @@ import re
 import aiohttp
 import logging
 import math
+from functools import lru_cache
+import sys
+import asyncio
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    stream=sys.stdout,
+    force=True
+)
 logger = logging.getLogger(__name__)
+print('=== PRINT TEST: parser.py загружен ===')
+logger.info('=== LOGGER TEST: parser.py logger работает ===')
 
 def extract_product_id(url):
     """Извлекает ID товара из URL Wildberries"""
@@ -20,27 +30,62 @@ def extract_product_id(url):
     return None
 
 def get_basket_host(vol: int) -> str:
-    """Определяет номер basket-хоста на основе vol"""
-    if 0 <= vol <= 143: return '01'
-    elif 144 <= vol <= 287: return '02'
-    elif 288 <= vol <= 431: return '03'
-    elif 432 <= vol <= 719: return '04'
-    elif 720 <= vol <= 1007: return '05'
-    elif 1008 <= vol <= 1061: return '06'
-    elif 1062 <= vol <= 1115: return '07'
-    elif 1116 <= vol <= 1169: return '08'
-    elif 1170 <= vol <= 1313: return '09'
-    elif 1314 <= vol <= 1601: return '10'
-    elif 1602 <= vol <= 1655: return '11'
-    elif 1656 <= vol <= 1919: return '12'
-    elif 1920 <= vol <= 2045: return '13'
-    elif 1920 <= vol <= 2189: return '14'
-    elif 1920 <= vol <= 2405: return '15'
-    elif 1920 <= vol <= 2621: return '16'
-    elif 1920 <= vol <= 2837: return '17'
-    elif 1920 <= vol <= 3053: return '18'
-    elif 1920 <= vol <= 3269: return '19'
-    else: return '20'
+    """Определяет номер basket-хоста на основе vol по старому алгоритму"""
+    # Оптимизировано с использованием списка диапазонов и поиска по ним
+    basket_ranges = [
+        (0, 143, '01'), (144, 287, '02'), (288, 431, '03'), (432, 719, '04'),
+        (720, 1007, '05'), (1008, 1061, '06'), (1062, 1115, '07'), (1116, 1169, '08'),
+        (1170, 1313, '09'), (1314, 1601, '10'), (1602, 1655, '11'), (1656, 1919, '12'),
+        (1920, 2045, '13'), (2046, 2189, '14'), (2190, 2405, '15'), (2406, 2621, '16'),
+        (2622, 2837, '17'), (2838, 3053, '18'), (3054, 3269, '19'), (3270, 3485, '20')
+    ]
+    for start, end, host in basket_ranges:
+        if start <= vol <= end:
+            return host
+    # Если vol не найден — возвращаем None
+    return None
+
+async def is_image_exists(host: str, vol: int, part: int, nm: int, session, timeout_sec=2) -> tuple:
+    url = f"https://basket-{host}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/big/1.webp"
+    try:
+        timeout = aiohttp.ClientTimeout(total=timeout_sec)
+        async with session.head(url, timeout=timeout) as resp:
+            logger.info(f"Пробую basket-{host} для vol={vol}, nm={nm}, статус={resp.status}")
+            return (resp.status == 200, None)
+    except Exception as e:
+        logger.warning(f"Ошибка при проверке картинки на basket-{host}: {e}")
+        if "Temporary failure in name resolution" in str(e):
+            return (False, "NO_MORE_BASKETS")
+        return (False, None)
+
+async def find_working_basket_host(vol: int, part: int, nm: int, session) -> str:
+    """Сначала basket по алгоритму, затем строго последовательный перебор basket-20...49 (кроме уже проверенного). Таймаут 1 секунда. DNS-ошибка — прекращаем перебор basket-XX > N."""
+    # 1. Пробуем basket по алгоритму
+    alg_host = get_basket_host(vol)
+    checked = set()
+    if alg_host is not None and alg_host.isdigit() and 20 <= int(alg_host) < 50:
+        result, err = await is_image_exists(alg_host, vol, part, nm, session, timeout_sec=1)
+        checked.add(alg_host)
+        if err == "NO_MORE_BASKETS":
+            logger.warning(f"DNS-ошибка на basket-{alg_host}, прекращаю перебор basket-XX > {alg_host}")
+            return None
+        if result:
+            logger.info(f"Нашёл рабочий basket-{alg_host} (по алгоритму) для vol={vol}, nm={nm}")
+            return alg_host
+    # 2. Перебираем basket-20...49 (кроме уже проверенного)
+    for i in range(20, 50):
+        host = str(i).zfill(2)
+        if host in checked:
+            continue
+        result, err = await is_image_exists(host, vol, part, nm, session, timeout_sec=1)
+        if err == "NO_MORE_BASKETS":
+            logger.warning(f"DNS-ошибка на basket-{host}, прекращаю перебор basket-XX > {host}")
+            break
+        if result:
+            logger.info(f"Нашёл рабочий basket-{host} для vol={vol}, nm={nm}")
+            return host
+    logger.error(f"Не удалось найти рабочий basket-хост для vol={vol}, nm={nm}")
+    return None
 
 async def get_product_details(product_id):
     """Получение данных о товаре через API"""
@@ -143,16 +188,16 @@ async def parse_wildberries_url(url):
         # Формируем URL изображения
         image_url = None
         try:
-            # Преобразуем product_id в число
             nm = int(product_id)
             vol = nm // 100000
             part = nm // 1000
-            
-            # Получаем номер хоста
-            host = get_basket_host(vol)
-            
-            # Создаем URL изображения большого размера
-            image_url = f"https://basket-{host}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/big/1.webp"
+            async with aiohttp.ClientSession() as session:
+                host = await find_working_basket_host(vol, part, nm, session)
+                if host:
+                    image_url = f"https://basket-{host}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/big/1.webp"
+                    logger.info(f"Сформирован image_url: {image_url}")
+                else:
+                    logger.error(f"Не удалось найти рабочий basket-хост для vol={vol}, nm={nm}")
         except Exception as e:
             logger.error(f"Ошибка при формировании URL изображения: {e}")
         
@@ -168,3 +213,27 @@ async def parse_wildberries_url(url):
     except Exception as e:
         logger.exception(f"Ошибка при парсинге товара: {e}")
         return None
+
+# Тестовая функция для отладки
+if __name__ == "__main__":
+    async def test_parser():
+        logger.debug("DEBUG сообщение - начало теста")
+        logger.info("INFO сообщение - начало теста")
+        
+        # Тестовый URL Wildberries
+        test_url = "https://www.wildberries.ru/catalog/139476294/detail.aspx"
+        logger.debug(f"Тестирование URL: {test_url}")
+        
+        result = await parse_wildberries_url(test_url)
+        
+        if result:
+            logger.debug("DEBUG - Успешный результат парсинга:")
+            logger.info("INFO - Успешный результат парсинга:")
+            for key, value in result.items():
+                logger.debug(f"DEBUG - {key}: {value}")
+                logger.info(f"INFO - {key}: {value}")
+        else:
+            logger.error("Ошибка при парсинге тестового URL")
+    
+    # Запускаем тест
+    asyncio.run(test_parser())

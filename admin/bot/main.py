@@ -1095,17 +1095,30 @@ async def reservation_detail_handler(callback: types.CallbackQuery):
                 )
             ]
         ]
-        await callback.message.edit_text(
+        goods_image = reservation.get('goods_image') or reservation.get('image')
+        caption = (
             f"📦 Бронирование №{reservation_id}\n\n"
             f"Товар: {reservation['goods_name']}\n"
             f"Количество: {reservation['quantity']} шт.\n"
             f"Цена: <s>{price} ₽</s>\n"
             f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽\n"
             f"Дата: {formatted_date}\n\n"
-            "Выберите действие:",
-            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
-            parse_mode=ParseMode.HTML
+            "Выберите действие:"
         )
+        if goods_image:
+            await callback.message.answer_photo(
+                photo=goods_image,
+                caption=caption,
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
+                parse_mode=ParseMode.HTML
+            )
+            await callback.message.delete()
+        else:
+            await callback.message.edit_text(
+                caption,
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
+                parse_mode=ParseMode.HTML
+            )
     except Exception as e:
         logger.error(f"Ошибка при получении бронирования: {e}")
         await callback.answer("⚠️ Не удалось загрузить данные", show_alert=True)
