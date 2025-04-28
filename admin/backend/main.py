@@ -87,6 +87,9 @@ _availability_cache_ttl = 10  # Время жизни кэша в секунда
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 
+REDIS_RETRIES = 5  # Количество попыток при ошибке Redis
+REDIS_RETRY_DELAY = 5  # Базовая задержка между попытками (сек)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -629,6 +632,20 @@ async def get_goods_details(
     return goods
 
 # Функция для отправки уведомления в бот
+async def redis_with_retries(method, *args, **kwargs):
+    for attempt in range(1, REDIS_RETRIES + 1):
+        try:
+            return await method(*args, **kwargs)
+        except Exception as e:
+            delay = REDIS_RETRY_DELAY * (2 ** (attempt - 1))
+            logger.error(f"Redis error on {method.__name__}, attempt {attempt}/{REDIS_RETRIES}: {e}")
+            if attempt < REDIS_RETRIES:
+                logger.warning(f"Retrying Redis operation {method.__name__} after {delay} seconds...")
+                await asyncio.sleep(delay)
+            else:
+                logger.critical(f"Redis operation {method.__name__} failed after {REDIS_RETRIES} attempts.")
+                raise
+
 async def push_notification_to_queue(user_id, goods_data, quantity, reservation_id=None):
     """Кладёт уведомление о бронировании в очередь Redis"""
     notification = {
@@ -640,7 +657,7 @@ async def push_notification_to_queue(user_id, goods_data, quantity, reservation_
     }
     try:
         logger.info(f"Пробуем положить уведомление в очередь Redis: {notification}")
-        await redis_client.rpush("notifications", json.dumps(notification))
+        await redis_with_retries(redis_client.rpush, "notifications", json.dumps(notification))
         logger.info(f"Уведомление успешно добавлено в очередь Redis для user_id={user_id}, goods_id={goods_data.get('id')}, reservation_id={reservation_id}")
     except Exception as e:
         logger.error(f"Ошибка при добавлении уведомления в очередь Redis: {str(e)}")
