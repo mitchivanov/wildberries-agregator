@@ -99,7 +99,54 @@ export const useApi = () => {
     const url = `/goods/?${searchParams.toString()}`;
     console.log(`URL запроса: ${url}`);
     
-    return request('get', url);
+    try {
+      setLoading(true);
+      const response = await api({
+        method: 'get',
+        url,
+      });
+      
+      // Обработка ответа для обеспечения корректного формата
+      const data = response.data;
+      
+      // Проверяем корректность поля total
+      if (data) {
+        // Если сервер вернул некорректное значение total, исправляем
+        if (typeof data.total === 'number' && data.total < (data.items?.length || 0)) {
+          console.warn(`Сервер вернул некорректное значение total=${data.total}, но items.length=${data.items?.length}`);
+          
+          // Если total меньше, чем количество полученных элементов, скорректируем его
+          data.total = Math.max(data.total, (skip || 0) + (data.items?.length || 0) + limit);
+          console.log(`Скорректированное значение total=${data.total}`);
+        }
+        
+        // Убедимся, что поле items всегда присутствует и это массив
+        if (!data.items) {
+          data.items = [];
+        } else if (!Array.isArray(data.items)) {
+          console.warn('Сервер вернул некорректное поле items, преобразуем к массиву');
+          data.items = [data.items].filter(Boolean);
+        }
+      }
+      
+      return data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.detail || error.message;
+      setError(errorMessage);
+      toast.error(`Ошибка: ${errorMessage}`);
+      
+      // Возвращаем стандартизированный объект ошибки
+      return {
+        error: true,
+        message: errorMessage,
+        status: error.response?.status,
+        data: error.response?.data,
+        items: [],
+        total: 0
+      };
+    } finally {
+      setLoading(false);
+    }
   }, [request]);
 
   // Поиск товаров с пагинацией

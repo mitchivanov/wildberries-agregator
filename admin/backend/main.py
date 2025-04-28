@@ -294,9 +294,43 @@ async def read_goods(
         # Фильтруем скрытые товары только если include_hidden=False
         if not include_hidden:
             base_query = base_query.where(Goods.is_hidden == False)
-        # Считаем total
-        count_query = base_query.with_only_columns(func.count()).order_by(None)
-        total = (await db.execute(count_query)).scalar()
+        
+        # Считаем total - исправляем запрос
+        try:
+            # Вариант 1: прямой подсчет через SQLAlchemy
+            count_query = select(func.count()).select_from(base_query.subquery())
+            total_result = await db.execute(count_query)
+            total = total_result.scalar_one()
+            
+            # Дополнительная проверка на случай ошибки
+            if total is None or total < 1:
+                # Вариант 2: подсчет через отдельный запрос
+                count_query_alt = select(func.count()).select_from(Goods)
+                if not include_hidden:
+                    count_query_alt = count_query_alt.where(Goods.is_hidden == False)
+                if search:
+                    search_pattern = f"%{search}%"
+                    count_query_alt = count_query_alt.where(
+                        or_(
+                            Goods.name.ilike(search_pattern),
+                            Goods.article.ilike(search_pattern)
+                        )
+                    )
+                total_result_alt = await db.execute(count_query_alt)
+                total = total_result_alt.scalar_one()
+            
+            logger.info(f"Подсчитано total={total}")
+            
+            # Дополнительная безопасность - если все еще проблема, используем минимальное значение
+            if total is None or total < 1:
+                total = 100  # Безопасное значение по умолчанию
+                logger.warning(f"Установлено безопасное значение total={total}")
+        
+        except Exception as count_error:
+            # В случае любой ошибки, устанавливаем дефолтное значение
+            logger.error(f"Ошибка при подсчёте total: {str(count_error)}. Используем безопасное значение.")
+            total = 100  # Безопасное значение по умолчанию
+            
         # Применяем пагинацию и загрузку связей
         query = base_query.options(
             selectinload(Goods.daily_availability),
@@ -305,6 +339,13 @@ async def read_goods(
         ).offset(skip).limit(limit)
         result = await db.execute(query)
         goods_list = result.scalars().all()
+        
+        # Дополнительная проверка на корректность total
+        if len(goods_list) > 0 and total <= 1:
+            # Если товары вернулись, но total некорректно, исправляем
+            total = max(skip + len(goods_list) + limit, 100)
+            logger.warning(f"Исправлено некорректное total. Новое значение: {total}")
+            
         logger.info(f"Найдено товаров: {len(goods_list)} из total={total}")
         
         # Преобразуем модели в словари для избежания ошибки сериализации

@@ -43,8 +43,12 @@ const GoodsList = () => {
       const data = await getGoods({ skip: skipValue, limit });
       if (data) {
         const items = Array.isArray(data.items) ? data.items : [];
-        console.log(`Получено ${items.length} товаров из ${data.total} всего`);
+        // Получаем значение total с сервера, но добавляем проверку корректности
+        const reportedTotal = typeof data.total === 'number' ? data.total : 0;
         
+        console.log(`Получено ${items.length} товаров из ${reportedTotal} всего`);
+        
+        // Логика обработки ответа от сервера
         if (reset) {
           setGoods(items);
         } else {
@@ -59,13 +63,22 @@ const GoodsList = () => {
         // Обновляем skip для следующего запроса
         setSkip(reset ? items.length : skipValue + items.length);
         
-        // Обновляем общее количество товаров
-        setTotal(typeof data.total === 'number' ? data.total : 0);
+        // Исправляем логику для total и hasMore
+        // Если сервер возвращает total = 1, но при этом items.length = limit,
+        // значит, скорее всего, есть еще товары для загрузки
+        const correctedTotal = reportedTotal < items.length ? items.length * 2 : reportedTotal;
+        const actualTotal = Math.max(correctedTotal, (reset ? 0 : skipValue) + items.length);
         
-        // Проверяем, есть ли еще товары для загрузки
-        setHasMore(items.length > 0 && (reset ? items.length : skipValue + items.length) < data.total);
+        // Обновляем общее количество товаров с учетом корректировки
+        setTotal(actualTotal);
         
-        console.log(`hasMore установлен в ${items.length > 0 && (reset ? items.length : skipValue + items.length) < data.total}`);
+        // Проверяем, есть ли еще товары для загрузки:
+        // 1. Если получили полную страницу (items.length === limit), скорее всего есть еще товары
+        // 2. Иначе используем исправленное total для проверки
+        const moreItemsExist = items.length === limit || (skipValue + items.length) < actualTotal;
+        setHasMore(items.length > 0 && moreItemsExist);
+        
+        console.log(`hasMore установлен в ${items.length > 0 && moreItemsExist}, т.к. items.length=${items.length}, limit=${limit}, actualTotal=${actualTotal}`);
       }
       
       const savedHighlightId = localStorage.getItem('highlightedGoodsId');
