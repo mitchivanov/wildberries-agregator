@@ -10,6 +10,7 @@ const Catalog = () => {
   const { isDarkMode, webApp } = useTelegram();
   const [goods, setGoods] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [initialLoaded, setInitialLoaded] = useState(false); // Флаг для отслеживания первой загрузки
   const [isSearching, setIsSearching] = useState(false);
   const [availabilityData, setAvailabilityData] = useState({});
   const [categories, setCategories] = useState([]);
@@ -27,14 +28,11 @@ const Catalog = () => {
 
   useEffect(() => {
     const loadCategories = async () => {
-      setLoading(true);
       try {
         const data = await getCategories();
         setCategories(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error('Ошибка при загрузке категорий:', err);
-      } finally {
-        setLoading(false);
       }
     };
     
@@ -45,7 +43,14 @@ const Catalog = () => {
     setLoading(true);
     setIsSearching(false);
     try {
+      // Показываем уведомление о загрузке
+      const loadingToast = toast.loading('Загружаем товары, пожалуйста, подождите...');
+      
       const data = await getGoods();
+      
+      // Закрываем уведомление о загрузке
+      toast.dismiss(loadingToast);
+      
       let availableGoods = [];
       if (Array.isArray(data)) {
         availableGoods = data.filter(item => item.is_active && !item.is_hidden);
@@ -76,9 +81,14 @@ const Catalog = () => {
           toast.info('В настоящее время нет доступных товаров');
         }
       }
+      
+      // Отмечаем, что первая загрузка завершена
+      setInitialLoaded(true);
     } catch (err) {
       console.error('Ошибка при загрузке товаров:', err);
       toast.error('Ошибка при загрузке товаров');
+      // Даже в случае ошибки отмечаем загрузку завершенной
+      setInitialLoaded(true);
     } finally {
       setLoading(false);
     }
@@ -176,6 +186,30 @@ const Catalog = () => {
     });
   }, [goods, availabilityData, selectedCategory]);
 
+  // Скелетон для отображения во время загрузки
+  const LoadingSkeleton = () => {
+    return (
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {[...Array(8)].map((_, index) => (
+          <div 
+            key={index} 
+            className={`animate-pulse rounded-lg shadow ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}
+          >
+            <div className={`h-48 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'} rounded-t-lg`}></div>
+            <div className="p-4 space-y-3">
+              <div className={`h-4 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'} rounded w-3/4`}></div>
+              <div className={`h-4 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'} rounded w-1/2`}></div>
+              <div className="flex justify-between pt-2">
+                <div className={`h-6 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'} rounded w-1/4`}></div>
+                <div className={`h-6 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'} rounded w-2/5`}></div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900'}`}>
       {/* Кнопка меню */}
@@ -190,6 +224,14 @@ const Catalog = () => {
         </svg>
       </button>
       
+      {/* Затемнение при открытом меню */}
+      {isMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-30"
+          onClick={() => setIsMenuOpen(false)}
+        ></div>
+      )}
+      
       {/* Боковое меню */}
       <div 
         className={`fixed inset-y-0 left-0 transform ${
@@ -203,7 +245,7 @@ const Catalog = () => {
             Категории
           </h3>
           
-          {loading ? (
+          {loading && !initialLoaded ? (
             <div className="flex justify-center items-center">
               <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -262,12 +304,26 @@ const Catalog = () => {
 
         <SearchBar onSearch={handleSearch} isDarkMode={isDarkMode} />
 
-        {loading ? (
-          <div className="text-center py-10">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-            <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка...</p>
+        {/* Сообщение о загрузке - более заметное */}
+        {loading && (
+          <div className={`p-4 mb-6 rounded-lg text-center ${
+            isDarkMode ? 'bg-blue-900 text-blue-100' : 'bg-blue-50 text-blue-800'
+          }`}>
+            <div className="flex items-center justify-center space-x-2">
+              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>Загружаем каталог, пожалуйста, подождите...</span>
+            </div>
           </div>
-        ) : goods?.length === 0 ? (
+        )}
+
+        {/* Основной контент */}
+        {loading && !initialLoaded ? (
+          // Показываем скелетон только при первой загрузке
+          <LoadingSkeleton />
+        ) : initialLoaded && goods?.length === 0 ? (
           <div className={`text-center py-10 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow`}>
             <p className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
               {isSearching 
