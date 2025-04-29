@@ -25,5 +25,8 @@ export default defineConfig({
         }
       }
     }
-  }
+  },
+  define: {
+    'import.meta.env.VITE_COMMIT_HASH': JSON.stringify(process.env.VITE_COMMIT_HASH || 'dev'),
+  },
 });
