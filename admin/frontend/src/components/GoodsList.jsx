@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useTelegram } from '../hooks/useTelegram';
@@ -6,8 +6,8 @@ import GoodsItem from './GoodsItem';
 import SearchBar from './SearchBar';
 import toast from 'react-hot-toast';
 
-const DEFAULT_PAGE_SIZE = 100;
-const PAGE_SIZE_OPTIONS = [10, 50, 100, 200, 500];
+const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 const GoodsList = () => {
   const { getGoods, searchGoods, deleteGoods, bulkHideGoods, bulkShowGoods } = useApi();
@@ -16,7 +16,6 @@ const GoodsList = () => {
 
   const [goods, setGoods] = useState([]);
   const [total, setTotal] = useState(0);
-  const [skip, setSkip] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -25,64 +24,53 @@ const GoodsList = () => {
   const [selectedGoods, setSelectedGoods] = useState(new Set());
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
-  const loaderRef = useRef(null);
-  const [hasMore, setHasMore] = useState(true);
+  // Заменяем переменные для бесконечной прокрутки на пагинацию
+  const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const loadGoods = useCallback(async (reset = false, customPageSize = null) => {
+  // Рассчитываем общее количество страниц
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(total / pageSize));
+  }, [total, pageSize]);
+
+  // Модифицированная функция загрузки товаров
+  const loadGoods = useCallback(async (page = 1, query = "", newPageSize = null) => {
     if (loading) return; // Предотвращаем множественные запросы
     
+    const actualPageSize = newPageSize !== null ? newPageSize : pageSize;
+    const skip = (page - 1) * actualPageSize;
+    
     setLoading(true);
-    setIsSearching(false);
+    
     try {
-      const limit = customPageSize !== null ? customPageSize : pageSize;
-      const skipValue = reset ? 0 : skip;
+      console.log(`Загрузка товаров: page=${page}, skip=${skip}, limit=${actualPageSize}, query=${query}`);
       
-      console.log(`Загрузка товаров: reset=${reset}, skipValue=${skipValue}, limit=${limit}`);
+      let data;
+      if (query) {
+        // Если есть поисковый запрос, используем searchGoods
+        setIsSearching(true);
+        data = await searchGoods(query, { skip, limit: actualPageSize });
+      } else {
+        // Иначе загружаем все товары
+        setIsSearching(false);
+        data = await getGoods({ skip, limit: actualPageSize });
+      }
       
-      const data = await getGoods({ skip: skipValue, limit });
       if (data) {
         const items = Array.isArray(data.items) ? data.items : [];
-        // Получаем значение total с сервера, но добавляем проверку корректности
         const reportedTotal = typeof data.total === 'number' ? data.total : 0;
         
         console.log(`Получено ${items.length} товаров из ${reportedTotal} всего`);
         
-        // Логика обработки ответа от сервера
-        if (reset) {
-          // При сбросе полностью заменяем список товаров
-          setGoods(items);
-        } else {
-          // При подгрузке добавляем только новые товары в конец списка
-          setGoods(prev => {
-            // Проверяем, есть ли дубликаты по ID
-            const existingIds = new Set(prev.map(item => item.id));
-            // Фильтруем новые товары, чтобы не добавлять дубликаты
-            const newItems = items.filter(item => !existingIds.has(item.id));
-            // Добавляем только новые товары в конец списка
-            return [...prev, ...newItems];
-          });
-        }
+        // Устанавливаем товары для текущей страницы
+        setGoods(items);
         
-        // Обновляем skip для следующего запроса
-        setSkip(reset ? items.length : skipValue + items.length);
+        // Устанавливаем общее количество товаров
+        setTotal(Math.max(reportedTotal, items.length));
         
-        // Исправляем логику для total и hasMore
-        // Если сервер возвращает total = 1, но при этом items.length = limit,
-        // значит, скорее всего, есть еще товары для загрузки
-        const correctedTotal = reportedTotal < items.length ? items.length * 2 : reportedTotal;
-        const actualTotal = Math.max(correctedTotal, (reset ? 0 : skipValue) + items.length);
-        
-        // Обновляем общее количество товаров с учетом корректировки
-        setTotal(actualTotal);
-        
-        // Проверяем, есть ли еще товары для загрузки:
-        // 1. Если получили полную страницу (items.length === limit), скорее всего есть еще товары
-        // 2. Иначе используем исправленное total для проверки
-        const moreItemsExist = items.length === limit || (skipValue + items.length) < actualTotal;
-        setHasMore(items.length > 0 && moreItemsExist);
-        
-        console.log(`hasMore установлен в ${items.length > 0 && moreItemsExist}, т.к. items.length=${items.length}, limit=${limit}, actualTotal=${actualTotal}`);
+        // Очищаем выбранные товары при смене страницы
+        setSelectedGoods(new Set());
       }
       
       const savedHighlightId = localStorage.getItem('highlightedGoodsId');
@@ -108,11 +96,15 @@ const GoodsList = () => {
     } finally {
       setLoading(false);
     }
-  }, [getGoods, skip, pageSize, loading]);
+  }, [pageSize, loading, getGoods, searchGoods]);
 
+  // Инициальная загрузка
   useEffect(() => {
-    loadGoods(true);
+    loadGoods(1);
+  }, []);
 
+  // Эффект для кнопки в Telegram WebApp
+  useEffect(() => {
     if (webApp) {
       webApp.MainButton.setParams({
         text: 'Добавить товар',
@@ -134,87 +126,34 @@ const GoodsList = () => {
     }
   }, [webApp, navigate]);
 
-  // Infinite scroll observer
-  useEffect(() => {
-    // Создаем IntersectionObserver только если есть товары для загрузки и элемент наблюдения существует
-    if (!hasMore || !loaderRef.current) return;
-
-    // Создаем функцию обработчика пересечения
-    const handleObserver = (entries) => {
-      const [entry] = entries;
-      // Загружаем новые данные только если:
-      // 1. Элемент видим (пересекает viewport)
-      // 2. Не идет загрузка в данный момент
-      // 3. Есть еще товары для загрузки
-      if (entry.isIntersecting && !loading && hasMore) {
-        console.log('Loader element intersecting viewport, loading more goods');
-        loadGoods(false);
-      }
-    };
-
-    // Создаем observer с более низким порогом для раннего обнаружения
-    const observer = new IntersectionObserver(handleObserver, {
-      // Уменьшаем порог до 0.1 (10% видимости элемента достаточно для срабатывания)
-      threshold: 0.1,
-      // Добавляем margin для раннего срабатывания до появления на экране
-      rootMargin: '100px'
-    });
-
-    observer.observe(loaderRef.current);
-    
-    console.log('IntersectionObserver attached with hasMore =', hasMore, 'loading =', loading);
-
-    // Очистка наблюдателя при размонтировании или изменении зависимостей
-    return () => {
-      if (loaderRef.current) {
-        observer.unobserve(loaderRef.current);
-      }
-      observer.disconnect();
-    };
-  }, [hasMore, loading, loadGoods]);
-
+  // Модифицированная функция поиска
   const handleSearch = async (query) => {
-    // Независимо от запроса, сбрасываем состояние
-    setSkip(0);
-    setTotal(0);
-    setHasMore(true);
+    setSearchQuery(query);
+    setCurrentPage(1); // Сбрасываем на первую страницу при поиске
     
-    if (!query.trim()) {
-      // Если запрос пустой, возвращаемся к обычному списку
-      setGoods([]); // Очищаем текущий список
-      setIsSearching(false);
-      return loadGoods(true);
-    }
+    loadGoods(1, query);
+  };
+
+  // Обработчик изменения страницы
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    loadGoods(page, searchQuery);
     
-    // Для непустого запроса выполняем поиск
-    setLoading(true);
-    setIsSearching(true);
-    setGoods([]); // Очищаем текущий список
+    // Скролл наверх при смене страницы
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  };
+
+  // При смене pageSize сбрасываем на первую страницу и загружаем товары заново
+  const handlePageSizeChange = (e) => {
+    const newSize = Number(e.target.value);
+    setPageSize(newSize);
+    setCurrentPage(1);
     
-    try {
-      const data = await searchGoods(query, { skip: 0, limit: pageSize });
-      if (data) {
-        const items = Array.isArray(data.items) ? data.items : [];
-        
-        // Устанавливаем результаты поиска
-        setGoods(items);
-        setTotal(typeof data.total === 'number' ? data.total : 0);
-        setSkip(items.length);
-        
-        // Определяем, есть ли еще результаты для подгрузки
-        const hasMoreResults = items.length > 0 && 
-                               items.length === pageSize && 
-                               items.length < (typeof data.total === 'number' ? data.total : Infinity);
-        setHasMore(hasMoreResults);
-        
-        console.log(`Поиск: найдено ${items.length} товаров, hasMore=${hasMoreResults}`);
-      }
-    } catch (err) {
-      setError(err.message);
-      toast.error(`Ошибка при поиске: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
+    // Загружаем с новым размером страницы
+    loadGoods(1, searchQuery, newSize);
   };
 
   const handleDelete = async (id) => {
@@ -222,6 +161,18 @@ const GoodsList = () => {
       await deleteGoods(id);
       setGoods(goods.filter(item => item.id !== id));
       toast.success('Товар удален');
+      
+      // Обновляем общее количество
+      setTotal(prev => Math.max(0, prev - 1));
+      
+      // Если удалили последний товар на странице и это не первая страница,
+      // переходим на предыдущую страницу
+      if (goods.length === 1 && currentPage > 1) {
+        handlePageChange(currentPage - 1);
+      } else {
+        // Иначе перезагружаем текущую страницу
+        loadGoods(currentPage, searchQuery);
+      }
     } catch (err) {
       toast.error(`Ошибка при удалении: ${err.message}`);
     }
@@ -263,91 +214,11 @@ const GoodsList = () => {
     setSortConfig({ key, direction });
   };
 
-  const SortableHeader = ({ column, label }) => {
-    return (
-      <th 
-        scope="col" 
-        className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer
-          ${isDarkMode ? 'text-gray-300 hover:text-white' : 'text-gray-500 hover:text-gray-700'}`}
-        onClick={() => requestSort(column)}
-      >
-        <div className="flex items-center space-x-1">
-          <span>{label}</span>
-          {sortConfig.key === column && (
-            <span>{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
-          )}
-        </div>
-      </th>
-    );
-  };
-
   const sortedGoods = useMemo(() => sortData(goods), [goods, sortConfig]);
 
   const themeClasses = isDarkMode
     ? 'bg-gray-800 border-gray-700 text-white'
     : 'bg-white border-gray-200 text-gray-700';
-
-  const toggleSelectGoods = (id) => {
-    setSelectedGoods(prev => {
-      const newSelected = new Set(prev);
-      if (newSelected.has(id)) {
-        newSelected.delete(id);
-      } else {
-        newSelected.add(id);
-      }
-      return newSelected;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedGoods.size === sortedGoods.length) {
-      setSelectedGoods(new Set());
-    } else {
-      setSelectedGoods(new Set(sortedGoods.map(item => parseInt(item.id))));
-    }
-  };
-
-  const handleBulkHide = async () => {
-    if (selectedGoods.size === 0) {
-      toast.error('Выберите товары для скрытия');
-      return;
-    }
-    
-    try {
-      const goodsIdsArray = Array.from(selectedGoods).map(Number);
-      console.log("Скрытие товаров:", goodsIdsArray);
-      console.log("Типы ID:", goodsIdsArray.map(id => typeof id));
-      
-      await bulkHideGoods(goodsIdsArray);
-      await loadGoods(true);
-    } catch (err) {
-      console.error("Ошибка при скрытии товаров:", err);
-      toast.error(`Ошибка: ${err.message}`);
-    }
-  };
-
-  const handleBulkShow = async () => {
-    if (selectedGoods.size === 0) {
-      toast.error('Выберите товары для показа');
-      return;
-    }
-    
-    try {
-      const goodsIdsArray = Array.from(selectedGoods).map(Number);
-      console.log("Показ товаров:", goodsIdsArray);
-      console.log("Типы ID:", goodsIdsArray.map(id => typeof id));
-      
-      await bulkShowGoods(goodsIdsArray);
-      await loadGoods(true);
-    } catch (err) {
-      console.error("Ошибка при показе товаров:", err);
-      toast.error(`Ошибка: ${err.message}`);
-    }
-  };
-
-  const tableHeaderClass = `px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${
-    isDarkMode ? 'text-gray-300' : 'text-gray-500'
-  }`;
 
   const handleSelectAll = (e) => {
     if (e.target.checked) {
@@ -371,19 +242,148 @@ const GoodsList = () => {
     });
   };
 
-  // При смене pageSize сбрасываем пагинацию и подгружаем новые данные
-  const handlePageSizeChange = (e) => {
-    const newSize = Number(e.target.value);
+  const handleBulkHide = async () => {
+    if (selectedGoods.size === 0) {
+      toast.error('Выберите товары для скрытия');
+      return;
+    }
     
-    // Сброс состояния при изменении размера страницы
-    setPageSize(newSize);
-    setSkip(0);
-    setTotal(0);
-    setGoods([]); // Очищаем список товаров
-    setHasMore(true);
+    try {
+      const goodsIdsArray = Array.from(selectedGoods).map(Number);
+      console.log("Скрытие товаров:", goodsIdsArray);
+      
+      await bulkHideGoods(goodsIdsArray);
+      await loadGoods(currentPage, searchQuery);
+      toast.success('Товары успешно скрыты');
+    } catch (err) {
+      console.error("Ошибка при скрытии товаров:", err);
+      toast.error(`Ошибка: ${err.message}`);
+    }
+  };
+
+  const handleBulkShow = async () => {
+    if (selectedGoods.size === 0) {
+      toast.error('Выберите товары для показа');
+      return;
+    }
     
-    // Принудительно загружаем первую страницу товаров с новым размером
-    loadGoods(true, newSize);
+    try {
+      const goodsIdsArray = Array.from(selectedGoods).map(Number);
+      console.log("Показ товаров:", goodsIdsArray);
+      
+      await bulkShowGoods(goodsIdsArray);
+      await loadGoods(currentPage, searchQuery);
+      toast.success('Товары успешно показаны');
+    } catch (err) {
+      console.error("Ошибка при показе товаров:", err);
+      toast.error(`Ошибка: ${err.message}`);
+    }
+  };
+
+  // Компонент пагинации
+  const Pagination = ({ currentPage, totalPages, onPageChange }) => {
+    // Определяем, какие номера страниц показывать
+    const getPageNumbers = () => {
+      const pages = [];
+      const maxVisiblePages = 5; // Максимальное количество видимых кнопок страниц
+      
+      // Если меньше или равно maxVisiblePages страниц, показываем все
+      if (totalPages <= maxVisiblePages) {
+        for (let i = 1; i <= totalPages; i++) {
+          pages.push(i);
+        }
+        return pages;
+      }
+      
+      // Всегда добавляем первую страницу
+      pages.push(1);
+      
+      // Вычисляем начальную и конечную страницу для отображения
+      let startPage = Math.max(2, currentPage - 1);
+      let endPage = Math.min(totalPages - 1, currentPage + 1);
+      
+      // Корректируем, если мы близко к началу или концу
+      if (currentPage <= 3) {
+        endPage = Math.min(totalPages - 1, 4);
+      } else if (currentPage >= totalPages - 2) {
+        startPage = Math.max(2, totalPages - 3);
+      }
+      
+      // Добавляем троеточие после первой страницы, если текущая страница далеко от начала
+      if (startPage > 2) {
+        pages.push('...');
+      }
+      
+      // Добавляем промежуточные страницы
+      for (let i = startPage; i <= endPage; i++) {
+        pages.push(i);
+      }
+      
+      // Добавляем троеточие перед последней страницей, если текущая страница далеко от конца
+      if (endPage < totalPages - 1) {
+        pages.push('...');
+      }
+      
+      // Всегда добавляем последнюю страницу, если totalPages > 1
+      if (totalPages > 1) {
+        pages.push(totalPages);
+      }
+      
+      return pages;
+    };
+    
+    const pageNumbers = getPageNumbers();
+    
+    return (
+      <div className={`flex justify-center items-center mt-4 space-x-1 ${
+        isDarkMode ? 'text-gray-200' : 'text-gray-700'
+      }`}>
+        {/* Кнопка "Предыдущая" */}
+        <button
+          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+          disabled={currentPage === 1}
+          className={`px-3 py-1 rounded ${
+            currentPage === 1
+              ? isDarkMode ? 'bg-gray-700 text-gray-500' : 'bg-gray-200 text-gray-400'
+              : isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'
+          }`}
+        >
+          &laquo;
+        </button>
+        
+        {/* Номера страниц */}
+        {pageNumbers.map((page, index) => (
+          page === '...' ? (
+            <span key={`ellipsis-${index}`} className="px-3 py-1">...</span>
+          ) : (
+            <button
+              key={`page-${page}`}
+              onClick={() => onPageChange(page)}
+              className={`px-3 py-1 rounded ${
+                currentPage === page
+                  ? isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                  : isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'
+              }`}
+            >
+              {page}
+            </button>
+          )
+        ))}
+        
+        {/* Кнопка "Следующая" */}
+        <button
+          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+          disabled={currentPage === totalPages || totalPages === 0}
+          className={`px-3 py-1 rounded ${
+            currentPage === totalPages || totalPages === 0
+              ? isDarkMode ? 'bg-gray-700 text-gray-500' : 'bg-gray-200 text-gray-400'
+              : isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'
+          }`}
+        >
+          &raquo;
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -415,6 +415,15 @@ const GoodsList = () => {
         </div>
       </div>
 
+      {/* Информация о результатах поиска и текущей странице */}
+      <div className={`mb-3 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        {isSearching ? (
+          <p>Поиск: "{searchQuery}" - найдено {total} товаров</p>
+        ) : (
+          <p>Всего товаров: {total}, страница {currentPage} из {totalPages}</p>
+        )}
+      </div>
+
       {selectedGoods.size > 0 && (
         <div className={`mb-4 p-2 rounded-lg flex items-center justify-between ${
           isDarkMode ? 'bg-gray-700' : 'bg-gray-100'
@@ -437,6 +446,7 @@ const GoodsList = () => {
         </div>
       )}
 
+      {/* Модифицированный контейнер таблицы */}
       <div className="w-full overflow-x-auto rounded-lg">
         {loading ? (
           <div className="text-center py-10">
@@ -455,7 +465,11 @@ const GoodsList = () => {
             </p>
             {isSearching && (
               <button
-                onClick={loadGoods}
+                onClick={() => {
+                  setSearchQuery("");
+                  setCurrentPage(1);
+                  loadGoods(1, "");
+                }}
                 className="mt-2 btn btn-secondary"
               >
                 Вернуться к полному списку
@@ -471,7 +485,11 @@ const GoodsList = () => {
             </p>
             {isSearching && (
               <button
-                onClick={loadGoods}
+                onClick={() => {
+                  setSearchQuery("");
+                  setCurrentPage(1);
+                  loadGoods(1, "");
+                }}
                 className="mt-2 btn btn-secondary"
               >
                 Вернуться к полному списку
@@ -479,10 +497,12 @@ const GoodsList = () => {
             )}
           </div>
         ) : (
+          // Оптимизированная таблица
           <div className={`shadow border ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} rounded-lg overflow-hidden`}>
             <table className="w-full table-fixed divide-y divide-gray-200">
               <thead className={`${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
                 <tr>
+                  {/* Оптимизированные ширины колонок */}
                   <th scope="col" className="w-12 px-2 py-3 text-center">
                     <input
                       type="checkbox"
@@ -674,23 +694,13 @@ const GoodsList = () => {
         )}
       </div>
 
-      <div 
-        ref={loaderRef} 
-        style={{ height: '50px', margin: '20px 0' }}
-        className={isDarkMode ? 'text-gray-300' : 'text-gray-500'} 
-      >
-        {loading && hasMore && (
-          <div className="text-center">
-            <svg className="animate-spin h-6 w-6 mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span>Загрузка...</span>
-          </div>
-        )}
-      </div>
-      {!hasMore && !loading && goods.length > 0 && (
-        <div className="text-center text-sm text-gray-400 mt-4">Все товары загружены</div>
+      {/* Компонент пагинации вместо бесконечной прокрутки */}
+      {!loading && goods.length > 0 && (
+        <Pagination 
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+        />
       )}
     </div>
   );
