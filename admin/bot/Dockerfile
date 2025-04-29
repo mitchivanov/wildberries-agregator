@@ -7,4 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+RUN echo "COMMIT_HASH=$(git rev-parse --short HEAD)" > /commit_hash.txt
+ENV COMMIT_HASH="$(cat /commit_hash.txt)"
+
 CMD ["python", "main.py"] 

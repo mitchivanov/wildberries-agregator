@@ -695,7 +695,7 @@ const GoodsList = () => {
       </div>
 
       {/* Компонент пагинации вместо бесконечной прокрутки */}
-      {!loading && goods.length > 0 && (
+      {!loading && goods.length > 0 && totalPages > 1 && (
         <Pagination 
           currentPage={currentPage}
           totalPages={totalPages}

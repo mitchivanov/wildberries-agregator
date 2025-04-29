@@ -84,6 +84,7 @@ services:
       - DATABASE_URL
       - API_URL
       - SUPER_ADMIN_IDS
+      - COMMIT_HASH
     depends_on:
       postgres:
         condition: service_healthy

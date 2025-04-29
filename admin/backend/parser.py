@@ -60,10 +60,10 @@ async def is_image_exists(host: str, vol: int, part: int, nm: int, session, time
 
 async def find_working_basket_host(vol: int, part: int, nm: int, session) -> str:
     """Сначала basket по алгоритму, затем строго последовательный перебор basket-20...49 (кроме уже проверенного). Таймаут 1 секунда. DNS-ошибка — прекращаем перебор basket-XX > N."""
-    # 1. Пробуем basket по алгоритму
     alg_host = get_basket_host(vol)
     checked = set()
-    if alg_host is not None and alg_host.isdigit() and 20 <= int(alg_host) < 50:
+    # 1. Всегда пробуем basket по алгоритму, если он есть
+    if alg_host is not None and alg_host.isdigit():
         result, err = await is_image_exists(alg_host, vol, part, nm, session, timeout_sec=1)
         checked.add(alg_host)
         if err == "NO_MORE_BASKETS":

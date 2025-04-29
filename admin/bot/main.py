@@ -32,7 +32,8 @@ BROADCASTS_PATH = os.path.join(os.path.dirname(__file__), 'broadcasts.json')
 
 SUPER_ADMIN_IDS = os.getenv("SUPER_ADMIN_IDS", "").split(',')
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "")
-TELEGRAM_WEBAPP_URL = os.getenv("TELEGRAM_WEBAPP_URL", "") + "?startapp=1"  # Добавляем параметр для инициализации
+COMMIT_HASH = os.getenv("COMMIT_HASH", "dev")
+TELEGRAM_WEBAPP_URL = os.getenv("TELEGRAM_WEBAPP_URL", "") + f"?startapp=1&v={COMMIT_HASH}"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 
@@ -1019,266 +1020,246 @@ async def get_user_reservations(user_id):
 
 @dp.message(Command("reservations"))
 async def cmd_reservations(message: types.Message):
-    try:
-        # Получаем список бронирований через API
-        reservations = await get_user_reservations(message.from_user.id)
-        
-        if not reservations:
-            await message.answer("🚫 У вас нет активных бронирований")
-            return
-        
-        # Формируем сообщение с кнопками
-        keyboard = []
-        for res in reservations:
-            # Форматируем дату
-            reserved_date = datetime.fromisoformat(res['reserved_at'].replace('Z', '+00:00'))
-            formatted_date = reserved_date.strftime('%d.%m.%Y')
-            
-            btn_text = f"{res['goods_name']} ({res['quantity']} шт.) - {formatted_date}"
-            keyboard.append([
-                types.InlineKeyboardButton(
-                    text=btn_text,
-                    callback_data=f"reservation_detail_{res['id']}"
-                )
-            ])
-        
-        # Добавляем кнопку закрытия
+    reservations = await get_user_reservations(message.from_user.id)
+    if not reservations:
+        await message.answer("🚫 У вас нет активных бронирований")
+        return
+    keyboard = []
+    for res in reservations:
+        reserved_date = datetime.fromisoformat(res['reserved_at'].replace('Z', '+00:00'))
+        formatted_date = reserved_date.strftime('%d.%m.%Y')
+        btn_text = f"{res['goods_name']} ({res['quantity']} шт.) - {formatted_date}"
         keyboard.append([
             types.InlineKeyboardButton(
-                text="❌ Закрыть",
-                callback_data="close_reservations"
+                text=btn_text,
+                callback_data=f"reservation_detail_{res['id']}"
             )
         ])
-        
-        await message.answer(
-            "📋 Ваши активные бронирования:\n\n"
-            "Нажмите на бронирование для управления:",
+    keyboard.append([
+        types.InlineKeyboardButton(
+            text="❌ Закрыть",
+            callback_data="close_reservations"
+        )
+    ])
+    await message.answer(
+        "📋 Ваши активные бронирования:\n\nНажмите на бронирование для управления:",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+# 1. Список бронирований
+async def render_reservations_list(message, user_id):
+    reservations = await get_user_reservations(user_id)
+    if not reservations:
+        # Если это фото, удаляем и отправляем новое текстовое сообщение
+        if getattr(message, 'photo', None):
+            await message.delete()
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="🚫 У вас нет активных бронирований",
+                reply_markup=None
+            )
+        else:
+            await message.edit_text(
+                "🚫 У вас нет активных бронирований",
+                reply_markup=None
+            )
+        return
+    keyboard = []
+    for res in reservations:
+        reserved_date = datetime.fromisoformat(res['reserved_at'].replace('Z', '+00:00'))
+        formatted_date = reserved_date.strftime('%d.%m.%Y')
+        btn_text = f"{res['goods_name']} ({res['quantity']} шт.) - {formatted_date}"
+        keyboard.append([
+            types.InlineKeyboardButton(
+                text=btn_text,
+                callback_data=f"reservation_detail_{res['id']}"
+            )
+        ])
+    keyboard.append([
+        types.InlineKeyboardButton(
+            text="❌ Закрыть",
+            callback_data="close_reservations"
+        )
+    ])
+    if getattr(message, 'photo', None):
+        await message.delete()
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text="📋 Ваши активные бронирования:\n\nНажмите на бронирование для управления:",
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
         )
-        
-    except Exception as e:
-        logger.error(f"Ошибка при получении бронирований: {e}")
-        await message.answer("⚠️ Произошла ошибка при загрузке бронирований")
-
-# Вспомогательная функция для отображения списка бронирований через редактирование
-async def update_reservations_list(message: types.Message):
-    try:
-        # Получаем список бронирований через API
-        user_id = message.chat.id  # Получаем ID пользователя из сообщения
-        reservations = await get_user_reservations(user_id)
-        
-        if not reservations:
-            # Если бронирований нет, сообщаем об этом обновляя текущее сообщение
-            try:
-                await message.edit_text(
-                    "🚫 У вас нет активных бронирований",
-                    reply_markup=None  # Убираем кнопки
-                )
-            except Exception as edit_error:
-                logger.error(f"Ошибка при редактировании сообщения (нет бронирований): {edit_error}")
-                # Если не удалось отредактировать, отправляем новое сообщение
-                await message.answer("🚫 У вас нет активных бронирований")
-            return
-        
-        # Формируем сообщение с кнопками
-        keyboard = []
-        for res in reservations:
-            # Форматируем дату
-            reserved_date = datetime.fromisoformat(res['reserved_at'].replace('Z', '+00:00'))
-            formatted_date = reserved_date.strftime('%d.%m.%Y')
-            
-            btn_text = f"{res['goods_name']} ({res['quantity']} шт.) - {formatted_date}"
-            keyboard.append([
-                types.InlineKeyboardButton(
-                    text=btn_text,
-                    callback_data=f"reservation_detail_{res['id']}"
-                )
-            ])
-        
-        # Добавляем кнопку закрытия
-        keyboard.append([
-            types.InlineKeyboardButton(
-                text="❌ Закрыть",
-                callback_data="close_reservations"
-            )
-        ])
-        
-        try:
-            # Пробуем отредактировать текущее сообщение
-            await message.edit_text(
-                "📋 Ваши активные бронирования:\n\n"
-                "Нажмите на бронирование для управления:",
-                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
-            )
-        except Exception as edit_error:
-            logger.error(f"Ошибка при редактировании сообщения (есть бронирования): {edit_error}")
-            # Если не удалось отредактировать, отправляем новое сообщение
-            await message.answer(
-                "📋 Ваши активные бронирования:\n\n"
-                "Нажмите на бронирование для управления:",
-                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
-            )
-        
-    except Exception as e:
-        logger.error(f"Ошибка при обновлении списка бронирований: {e}")
-        try:
-            # Пробуем отредактировать сообщение с ошибкой
-            await message.edit_text("⚠️ Произошла ошибка при загрузке бронирований")
-        except:
-            # Если не удалось, отправляем новое сообщение
-            await message.answer("⚠️ Произошла ошибка при загрузке бронирований")
-
-@dp.callback_query(F.data.startswith("reservation_detail_"))
-async def reservation_detail_handler(callback: types.CallbackQuery):
-    reservation_id = callback.data.split("_")[-1]
-    try:
-        reservations = await get_user_reservations(callback.from_user.id)
-        reservation = next((r for r in reservations if str(r['id']) == reservation_id), None)
-        if not reservation:
-            await callback.answer("Бронирование не найдено", show_alert=True)
-            return
-        reserved_date = datetime.fromisoformat(reservation['reserved_at'].replace('Z', '+00:00'))
-        formatted_date = reserved_date.strftime('%d.%m.%Y %H:%M')
-        price = reservation['goods_price']
-        cashback_percent = reservation['goods_cashback_percent'] or 0
-        price_with_cashback = price * (1 - cashback_percent / 100)
-        # Формируем клавиатуру с новой кнопкой
-        keyboard = [
-            [
-                types.InlineKeyboardButton(
-                    text="❌ Отменить бронирование",
-                    callback_data=f"cancel_reservation_{reservation_id}"
-                )
-            ],
-            [
-                types.InlineKeyboardButton(
-                    text="📖 Посмотреть инструкцию",
-                    callback_data=f"show_guide_{reservation_id}"
-                )
-            ],
-            [
-                types.InlineKeyboardButton(
-                    text="🔙 Назад",
-                    callback_data="back_to_reservations"
-                )
-            ]
-        ]
-        goods_image = reservation.get('goods_image') or reservation.get('image')
-        caption = (
-            f"📦 Бронирование №{reservation_id}\n\n"
-            f"Товар: {reservation['goods_name']}\n"
-            f"Количество: {reservation['quantity']} шт.\n"
-            f"Цена: <s>{price} ₽</s>\n"
-            f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽\n"
-            f"Дата: {formatted_date}\n\n"
-            "Выберите действие:"
+    else:
+        await message.edit_text(
+            "📋 Ваши активные бронирования:\n\nНажмите на бронирование для управления:",
+            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
         )
-        if goods_image:
-            # Для сообщений с фото мы не можем редактировать их, 
-            # поэтому отправляем новое и сохраняем старое (не удаляем)
-            await callback.message.answer_photo(
-                photo=goods_image,
+
+# 2. Карточка бронирования
+async def render_reservation_detail(message, reservation, as_photo=False):
+    reservation_id = reservation['id']
+    reserved_date = datetime.fromisoformat(reservation['reserved_at'].replace('Z', '+00:00'))
+    formatted_date = reserved_date.strftime('%d.%m.%Y %H:%M')
+    price = reservation['goods_price']
+    cashback_percent = reservation['goods_cashback_percent'] or 0
+    price_with_cashback = price * (1 - cashback_percent / 100)
+    goods_image = reservation.get('goods_image') or reservation.get('image')
+    caption = (
+        f"📦 Бронирование №{reservation_id}\n\n"
+        f"Товар: {reservation['goods_name']}\n"
+        f"Количество: {reservation['quantity']} шт.\n"
+        f"Цена: <s>{price} ₽</s>\n"
+        f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽\n"
+        f"Дата: {formatted_date}\n\n"
+        "Выберите действие:"
+    )
+    keyboard = [
+        [types.InlineKeyboardButton(
+            text="❌ Отменить бронирование",
+            callback_data=f"cancel_reservation_{reservation_id}"
+        )],
+        [types.InlineKeyboardButton(
+            text="📖 Посмотреть инструкцию",
+            callback_data=f"show_guide_{reservation_id}"
+        )],
+        [types.InlineKeyboardButton(
+            text="🔙 Назад к списку",
+            callback_data="back_to_reservations"
+        )]
+    ]
+    if as_photo and goods_image:
+        try:
+            await message.edit_caption(
                 caption=caption,
                 reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
                 parse_mode=ParseMode.HTML
             )
-        else:
-            # Если нет изображения, просто редактируем текущее сообщение
-            try:
-                await callback.message.edit_text(
-                    caption,
-                    reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
-                    parse_mode=ParseMode.HTML
-                )
-            except Exception as edit_error:
-                # Если по какой-то причине не удалось отредактировать, отправляем новое
-                logger.error(f"Ошибка при редактировании сообщения детализации: {edit_error}")
-                await callback.message.answer(
-                    caption,
-                    reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
-                    parse_mode=ParseMode.HTML
-                )
-    except Exception as e:
-        logger.error(f"Ошибка при получении бронирования: {e}")
-        await callback.answer("⚠️ Не удалось загрузить данные", show_alert=True)
+        except Exception as e:
+            # Если не удалось отредактировать caption (например, если это не фото), fallback на edit_text
+            await message.edit_text(
+                caption,
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
+                parse_mode=ParseMode.HTML
+            )
+    else:
+        await message.edit_text(
+            caption,
+            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
+            parse_mode=ParseMode.HTML
+        )
+
+# 3. Инструкция по бронированию
+async def render_reservation_guide(message, reservation):
+    reservation_id = reservation['id']
+    reserved_date = datetime.fromisoformat(reservation['reserved_at'].replace('Z', '+00:00'))
+    formatted_date = reserved_date.strftime('%d.%m.%Y %H:%M')
+    price = reservation['goods_price']
+    cashback_percent = reservation['goods_cashback_percent'] or 0
+    price_with_cashback = price * (1 - cashback_percent / 100)
+    goods_image = reservation.get('goods_image') or reservation.get('image')
+    guide = reservation.get('goods_purchase_guide') or reservation.get('purchase_guide')
+    goods_name = reservation.get('goods_name', 'Товар')
+    caption = (
+        f"📦 Бронирование №{reservation_id}\n\n"
+        f"Товар: {reservation['goods_name']}\n"
+        f"Количество: {reservation['quantity']} шт.\n"
+        f"Цена: <s>{price} ₽</s>\n"
+        f"Цена с кэшбеком {cashback_percent}%: {round(price_with_cashback)} ₽\n"
+        f"Дата: {formatted_date}\n\n"
+        "<b>Инструкция по выкупу:</b>\n"
+        f"{guide if guide else 'Инструкция отсутствует'}\n\n"
+        "Выберите действие:"
+    )
+    keyboard = [
+        [types.InlineKeyboardButton(
+            text="🔙 Назад к карточке",
+            callback_data=f"back_to_reservation_{reservation_id}"
+        )]
+    ]
+    if goods_image:
+        try:
+            await message.edit_caption(
+                caption=caption,
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
+                parse_mode=ParseMode.HTML
+            )
+        except Exception as e:
+            await message.edit_text(
+                caption,
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
+                parse_mode=ParseMode.HTML
+            )
+    else:
+        await message.edit_text(
+            caption,
+            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
+            parse_mode=ParseMode.HTML
+        )
+
+@dp.callback_query(F.data.startswith("reservation_detail_"))
+async def reservation_detail_handler(callback: types.CallbackQuery):
+    reservation_id = callback.data.split("_")[-1]
+    reservations = await get_user_reservations(callback.from_user.id)
+    reservation = next((r for r in reservations if str(r['id']) == reservation_id), None)
+    if not reservation:
+        await callback.answer("Бронирование не найдено", show_alert=True)
+        return
+    goods_image = reservation.get('goods_image') or reservation.get('image')
+    if goods_image:
+        # Если текущее сообщение с фото, редактируем caption, иначе отправляем фото и удаляем текстовое сообщение
+        try:
+            await callback.message.edit_caption(
+                caption=None  # Если вдруг было фото, убираем caption
+            )
+        except:
+            pass
+        try:
+            await callback.message.edit_media(
+                types.InputMediaPhoto(media=goods_image, caption=None)
+            )
+            await render_reservation_detail(callback.message, reservation, as_photo=True)
+        except Exception as e:
+            # Если не удалось заменить media, fallback на текст
+            await render_reservation_detail(callback.message, reservation, as_photo=False)
+    else:
+        await render_reservation_detail(callback.message, reservation, as_photo=False)
+    await callback.answer()
 
 @dp.callback_query(F.data.startswith("show_guide_"))
 async def show_guide_handler(callback: types.CallbackQuery):
     reservation_id = callback.data.split("_")[-1]
-    try:
-        reservations = await get_user_reservations(callback.from_user.id)
-        reservation = next((r for r in reservations if str(r['id']) == reservation_id), None)
-        logger.info(f"[show_guide_handler] reservation_id={reservation_id}, reservation={reservation}")
-        if not reservation:
-            await callback.answer("Бронирование не найдено", show_alert=True)
-            return
-        guide = reservation.get('goods_purchase_guide') or reservation.get('purchase_guide')
-        goods_name = reservation.get('goods_name', 'Товар')
-        goods_image = reservation.get('goods_image') or reservation.get('image')
-        logger.info(f"[show_guide_handler] guide found: {guide}")
-        
-        if guide:
-            await callback.answer()
-            
-            # Отправляем инструкцию с изображением, если оно доступно
-            if goods_image:
-                try:
-                    await callback.message.answer_photo(
-                        photo=goods_image,
-                        caption=f"📖 <b>Инструкция по выкупу {goods_name}:</b>\n\n{guide}",
-                        parse_mode=ParseMode.HTML
-                    )
-                except Exception as img_error:
-                    logger.error(f"Ошибка при отправке изображения: {img_error}")
-                    # Если не удалось отправить изображение, отправляем только текст
-                    await callback.message.answer(
-                        f"📖 <b>Инструкция по выкупу {goods_name}:</b>\n\n{guide}", 
-                        parse_mode=ParseMode.HTML
-                    )
-            else:
-                # Если изображения нет, отправляем только текст
-                await callback.message.answer(
-                    f"📖 <b>Инструкция по выкупу {goods_name}:</b>\n\n{guide}", 
-                    parse_mode=ParseMode.HTML
-                )
-        else:
-            await callback.answer("Инструкция отсутствует", show_alert=True)
-    except Exception as e:
-        logger.error(f"Ошибка при показе инструкции: {e}")
-        await callback.answer("⚠️ Не удалось показать инструкцию", show_alert=True)
+    reservations = await get_user_reservations(callback.from_user.id)
+    reservation = next((r for r in reservations if str(r['id']) == reservation_id), None)
+    if not reservation:
+        await callback.answer("Бронирование не найдено", show_alert=True)
+        return
+    await render_reservation_guide(callback.message, reservation)
+    await callback.answer()
 
-@dp.callback_query(F.data.startswith("cancel_reservation_"))
-async def cancel_reservation_handler(callback: types.CallbackQuery):
+@dp.callback_query(F.data.startswith("back_to_reservation_"))
+async def back_to_reservation_handler(callback: types.CallbackQuery):
     reservation_id = callback.data.split("_")[-1]
-    user_id = callback.from_user.id
-    
-    try:
-        # Более простой запрос - ID пользователя прямо в URL
-        async with aiohttp.ClientSession() as session:
-            async with session.delete(
-                f"{BACKEND_API_URL}/reservations/{reservation_id}/user/{user_id}"
-            ) as response:
-                if response.status != 204:
-                    error_text = await response.text()
-                    logger.error(f"Ошибка при отмене бронирования: {response.status}, {error_text}")
-                    await callback.answer("⚠️ Не удалось отменить бронирование", show_alert=True)
-                    return
-                
-                # Успешная отмена
-                await callback.answer("✅ Бронирование успешно отменено!")
-                
-                # Обновляем список бронирований через новую функцию
-                await update_reservations_list(callback.message)
-                
-    except Exception as e:
-        logger.error(f"Ошибка при отмене бронирования: {e}")
-        await callback.answer("⚠️ Не удалось отменить бронирование", show_alert=True)
+    reservations = await get_user_reservations(callback.from_user.id)
+    reservation = next((r for r in reservations if str(r['id']) == reservation_id), None)
+    if not reservation:
+        await callback.answer("Бронирование не найдено", show_alert=True)
+        return
+    goods_image = reservation.get('goods_image') or reservation.get('image')
+    if goods_image:
+        try:
+            await callback.message.edit_media(
+                types.InputMediaPhoto(media=goods_image, caption=None)
+            )
+            await render_reservation_detail(callback.message, reservation, as_photo=True)
+        except Exception as e:
+            await render_reservation_detail(callback.message, reservation, as_photo=False)
+    else:
+        await render_reservation_detail(callback.message, reservation, as_photo=False)
+    await callback.answer()
 
 @dp.callback_query(F.data == "back_to_reservations")
 async def back_to_reservations_handler(callback: types.CallbackQuery):
+    await render_reservations_list(callback.message, callback.from_user.id)
     await callback.answer()
-    # Используем новую функцию для обновления списка бронирований
-    await update_reservations_list(callback.message)
 
 @dp.callback_query(F.data == "close_reservations")
 async def close_reservations_handler(callback: types.CallbackQuery):
@@ -1292,6 +1273,27 @@ async def help_command(message: types.Message):
     /reservations - Список бронирований
     /categories - Список категорий
     """)
+
+@dp.callback_query(F.data.startswith("cancel_reservation_"))
+async def cancel_reservation_handler(callback: types.CallbackQuery):
+    reservation_id = callback.data.split("_")[-1]
+    user_id = callback.from_user.id
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(
+                f"{BACKEND_API_URL}/reservations/{reservation_id}/user/{user_id}"
+            ) as response:
+                if response.status != 204:
+                    error_text = await response.text()
+                    logger.error(f"Ошибка при отмене бронирования: {response.status}, {error_text}")
+                    await callback.answer("⚠️ Не удалось отменить бронирование", show_alert=True)
+                    return
+        await callback.answer("✅ Бронирование успешно отменено!")
+        await render_reservations_list(callback.message, user_id)
+    except Exception as e:
+        logger.error(f"Ошибка при отмене бронирования: {e}")
+        await callback.answer("⚠️ Не удалось отменить бронирование", show_alert=True)
+
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main()) 
