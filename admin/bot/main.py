@@ -1134,34 +1134,10 @@ async def show_guide_handler(callback: types.CallbackQuery):
             await callback.answer("Бронирование не найдено", show_alert=True)
             return
         guide = reservation.get('goods_purchase_guide') or reservation.get('purchase_guide')
-        goods_image = reservation.get('goods_image') or reservation.get('image')
-        goods_name = reservation.get('goods_name', 'Товар')
         logger.info(f"[show_guide_handler] guide found: {guide}")
-        
         if guide:
             await callback.answer()
-            
-            # Отправляем инструкцию с изображением, если оно доступно
-            if goods_image:
-                try:
-                    await callback.message.answer_photo(
-                        photo=goods_image,
-                        caption=f"📖 <b>Инструкция по выкупу {goods_name}:</b>\n\n{guide}",
-                        parse_mode=ParseMode.HTML
-                    )
-                except Exception as img_error:
-                    logger.error(f"Ошибка при отправке изображения: {img_error}")
-                    # Если не удалось отправить изображение, отправляем только текст
-                    await callback.message.answer(
-                        f"📖 <b>Инструкция по выкупу {goods_name}:</b>\n\n{guide}", 
-                        parse_mode=ParseMode.HTML
-                    )
-            else:
-                # Если изображения нет, отправляем только текст
-                await callback.message.answer(
-                    f"📖 <b>Инструкция по выкупу {goods_name}:</b>\n\n{guide}", 
-                    parse_mode=ParseMode.HTML
-                )
+            await callback.message.answer(f"📖 <b>Инструкция по выкупу:</b>\n\n{guide}", parse_mode=ParseMode.HTML)
         else:
             await callback.answer("Инструкция отсутствует", show_alert=True)
     except Exception as e:
