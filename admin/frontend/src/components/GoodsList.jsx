@@ -50,13 +50,17 @@ const GoodsList = () => {
         
         // Логика обработки ответа от сервера
         if (reset) {
+          // При сбросе полностью заменяем список товаров
           setGoods(items);
         } else {
+          // При подгрузке добавляем только новые товары в конец списка
           setGoods(prev => {
-            // Проверяем, что не добавляем дубликаты
-            const newIds = new Set(items.map(item => item.id));
-            const prevFiltered = prev.filter(item => !newIds.has(item.id));
-            return [...prevFiltered, ...items];
+            // Проверяем, есть ли дубликаты по ID
+            const existingIds = new Set(prev.map(item => item.id));
+            // Фильтруем новые товары, чтобы не добавлять дубликаты
+            const newItems = items.filter(item => !existingIds.has(item.id));
+            // Добавляем только новые товары в конец списка
+            return [...prev, ...newItems];
           });
         }
         
@@ -170,30 +174,44 @@ const GoodsList = () => {
   }, [hasMore, loading, loadGoods]);
 
   const handleSearch = async (query) => {
-    if (!query.trim()) {
-      setSkip(0);
-      setGoods([]);
-      setTotal(0);
-      setHasMore(true);
-      return loadGoods(true);
-    }
-    setLoading(true);
-    setIsSearching(true);
+    // Независимо от запроса, сбрасываем состояние
     setSkip(0);
-    setGoods([]);
     setTotal(0);
     setHasMore(true);
+    
+    if (!query.trim()) {
+      // Если запрос пустой, возвращаемся к обычному списку
+      setGoods([]); // Очищаем текущий список
+      setIsSearching(false);
+      return loadGoods(true);
+    }
+    
+    // Для непустого запроса выполняем поиск
+    setLoading(true);
+    setIsSearching(true);
+    setGoods([]); // Очищаем текущий список
+    
     try {
       const data = await searchGoods(query, { skip: 0, limit: pageSize });
       if (data) {
         const items = Array.isArray(data.items) ? data.items : [];
+        
+        // Устанавливаем результаты поиска
         setGoods(items);
         setTotal(typeof data.total === 'number' ? data.total : 0);
         setSkip(items.length);
-        setHasMore(items.length < (typeof data.total === 'number' ? data.total : 0));
+        
+        // Определяем, есть ли еще результаты для подгрузки
+        const hasMoreResults = items.length > 0 && 
+                               items.length === pageSize && 
+                               items.length < (typeof data.total === 'number' ? data.total : Infinity);
+        setHasMore(hasMoreResults);
+        
+        console.log(`Поиск: найдено ${items.length} товаров, hasMore=${hasMoreResults}`);
       }
     } catch (err) {
       setError(err.message);
+      toast.error(`Ошибка при поиске: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -356,15 +374,20 @@ const GoodsList = () => {
   // При смене pageSize сбрасываем пагинацию и подгружаем новые данные
   const handlePageSizeChange = (e) => {
     const newSize = Number(e.target.value);
+    
+    // Сброс состояния при изменении размера страницы
     setPageSize(newSize);
     setSkip(0);
     setTotal(0);
-    setGoods([]);
+    setGoods([]); // Очищаем список товаров
+    setHasMore(true);
+    
+    // Принудительно загружаем первую страницу товаров с новым размером
     loadGoods(true, newSize);
   };
 
   return (
-    <div className="px-1 sm:px-2 lg:px-4">
+    <div className="px-1 sm:px-2 lg:px-4 max-w-full">
       <div className="flex flex-col sm:flex-row justify-between items-center mb-4 space-y-2 sm:space-y-0">
         <SearchBar onSearch={handleSearch} />
         <div className="flex items-center space-x-4">
@@ -414,204 +437,243 @@ const GoodsList = () => {
         </div>
       )}
 
-      <div className="w-full overflow-x-auto">
-        <div className="inline-block min-w-full align-middle">
-          {loading ? (
-            <div className="text-center py-10">
-              <svg className="animate-spin h-10 w-10 text-blue-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка...</p>
-            </div>
-          ) : goods.length === 0 ? (
-            <div className={`text-center py-10 rounded-lg shadow ${themeClasses}`}>
-              <p>
-                {isSearching
-                  ? 'По вашему запросу ничего не найдено'
-                  : 'Список товаров пуст'}
-              </p>
-              {isSearching && (
-                <button
-                  onClick={loadGoods}
-                  className="mt-2 btn btn-secondary"
-                >
-                  Вернуться к полному списку
-                </button>
-              )}
-            </div>
-          ) : !Array.isArray(goods) || goods.length === 0 ? (
-            <div className={`text-center py-10 rounded-lg shadow ${themeClasses}`}>
-              <p>
-                {isSearching
-                  ? 'По вашему запросу ничего не найдено'
-                  : 'Список товаров пуст'}
-              </p>
-              {isSearching && (
-                <button
-                  onClick={loadGoods}
-                  className="mt-2 btn btn-secondary"
-                >
-                  Вернуться к полному списку
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col">
-              <div className="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-                <div className="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
-                  <div className={`shadow overflow-hidden border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} sm:rounded-lg`}>
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className={`${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
-                        <tr>
-                          <th scope="col" className="relative px-6 py-3">
-                            <input
-                              type="checkbox"
-                              onChange={handleSelectAll}
-                              checked={selectedGoods.size === goods.length}
-                              className="rounded border-gray-300"
-                            />
-                          </th>
-                          <th scope="col" className="px-6 py-3">Изображение</th>
-                          <SortableHeader column="id" label="ID" />
-                          <SortableHeader column="name" label="Название" />
-                          <SortableHeader column="category" label="Категория" />
-                          <SortableHeader column="article" label="Артикул" />
-                          <SortableHeader column="price" label="Цена" />
-                          <SortableHeader column="cashback_percent" label="Кешбэк %" />
-                          <SortableHeader column="min_daily" label="Мин. в день" />
-                          <SortableHeader column="max_daily" label="Макс. в день" />
-                          <SortableHeader column="is_active" label="Статус" />
-                          <SortableHeader column="is_hidden" label="Видимость" />
-                          <th scope="col" className="px-6 py-3">Действия</th>
-                        </tr>
-                      </thead>
-                      <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700 bg-gray-800' : 'divide-gray-200 bg-white'}`}>
-                        {sortedGoods.map((item) => (
-                          <tr 
-                            key={item.id} 
-                            className={`
-                              ${isDarkMode 
-                                ? item.is_hidden ? 'bg-gray-900 hover:bg-gray-800' : 'hover:bg-gray-700' 
-                                : item.is_hidden ? 'bg-gray-100 hover:bg-gray-200' : 'hover:bg-gray-50'}
-                              ${highlightedGoodsId === parseInt(item.id) ? 'border-l-4 border-blue-500' : ''}
-                            `}
-                            id={`goods-row-${item.id}`}
-                          >
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              <input
-                                type="checkbox"
-                                checked={selectedGoods.has(parseInt(item.id))}
-                                onChange={() => handleSelectItem(parseInt(item.id))}
-                                className="rounded border-gray-300"
-                              />
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap`}>
-                              <div className="flex items-center justify-center h-16 w-16 overflow-hidden rounded">
-                                <img 
-                                  src={item.image} 
-                                  alt={item.name}
-                                  className="h-full w-full object-cover"
-                                  onError={(e) => {
-                                    e.target.onerror = null;
-                                    e.target.src = "https://via.placeholder.com/80?text=Нет+фото";
-                                  }}
-                                />
-                              </div>
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              {item.id}
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {item.name}
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              {item.category ? (
-                                <span className={`px-2 py-1 text-xs rounded ${
-                                  isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
-                                }`}>
-                                  {item.category.name}
-                                </span>
-                              ) : (
-                                <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                                  Без категории
-                                </span>
-                              )}
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              {item.article}
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              {item.price} ₽
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              {item.cashback_percent}%
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              {item.min_daily}
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              {item.max_daily}
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm`}>
-                              <span className={`px-2 py-1 text-xs rounded ${
-                                item.is_active
-                                  ? isDarkMode ? 'bg-green-800 text-green-100' : 'bg-green-100 text-green-800'
-                                  : isDarkMode ? 'bg-red-800 text-red-100' : 'bg-red-100 text-red-800'
-                              }`}>
-                                {item.is_active ? 'Активен' : 'Неактивен'}
-                              </span>
-                            </td>
-                            <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                              <span className="flex items-center">
-                                {item.is_hidden ? (
-                                  <span className="inline-flex items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                                      <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
-                                      <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
-                                    </svg>
-                                    <span className="text-red-500">Скрыт</span>
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                                      <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                                      <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-                                    </svg>
-                                    <span className="text-green-500">Виден</span>
-                                  </span>
-                                )}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <div className="flex justify-end space-x-3">
-                                <Link
-                                  to={`/admin/goods/edit/${item.id}`}
-                                  className={isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-900'}
-                                >
-                                  Изменить
-                                </Link>
-                                <button
-                                  onClick={() => handleDelete(item.id)}
-                                  className={isDarkMode ? 'text-red-400 hover:text-red-300' : 'text-red-600 hover:text-red-900'}
-                                >
-                                  Удалить
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+      <div className="w-full overflow-x-auto rounded-lg">
+        {loading ? (
+          <div className="text-center py-10">
+            <svg className="animate-spin h-10 w-10 text-blue-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Загрузка...</p>
+          </div>
+        ) : goods.length === 0 ? (
+          <div className={`text-center py-10 rounded-lg shadow ${themeClasses}`}>
+            <p>
+              {isSearching
+                ? 'По вашему запросу ничего не найдено'
+                : 'Список товаров пуст'}
+            </p>
+            {isSearching && (
+              <button
+                onClick={loadGoods}
+                className="mt-2 btn btn-secondary"
+              >
+                Вернуться к полному списку
+              </button>
+            )}
+          </div>
+        ) : !Array.isArray(goods) || goods.length === 0 ? (
+          <div className={`text-center py-10 rounded-lg shadow ${themeClasses}`}>
+            <p>
+              {isSearching
+                ? 'По вашему запросу ничего не найдено'
+                : 'Список товаров пуст'}
+            </p>
+            {isSearching && (
+              <button
+                onClick={loadGoods}
+                className="mt-2 btn btn-secondary"
+              >
+                Вернуться к полному списку
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className={`shadow border ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} rounded-lg overflow-hidden`}>
+            <table className="w-full table-fixed divide-y divide-gray-200">
+              <thead className={`${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+                <tr>
+                  <th scope="col" className="w-12 px-2 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      onChange={handleSelectAll}
+                      checked={selectedGoods.size === goods.length}
+                      className="rounded border-gray-300"
+                    />
+                  </th>
+                  <th scope="col" className="w-20 px-2 py-3">Фото</th>
+                  <th scope="col" className="w-14 px-2 py-3" onClick={() => requestSort("id")}>
+                    <div className="flex items-center justify-center">
+                      <span>ID</span>
+                      {sortConfig.key === "id" && (
+                        <span className="ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th scope="col" className="w-1/4 px-2 py-3" onClick={() => requestSort("name")}>
+                    <div className="flex items-center">
+                      <span>Название</span>
+                      {sortConfig.key === "name" && (
+                        <span className="ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th scope="col" className="w-24 px-2 py-3" onClick={() => requestSort("category")}>
+                    <div className="flex items-center">
+                      <span>Категория</span>
+                      {sortConfig.key === "category" && (
+                        <span className="ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th scope="col" className="w-24 px-2 py-3" onClick={() => requestSort("article")}>
+                    <div className="flex items-center">
+                      <span>Артикул</span>
+                      {sortConfig.key === "article" && (
+                        <span className="ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th scope="col" className="w-20 px-2 py-3" onClick={() => requestSort("price")}>
+                    <div className="flex items-center">
+                      <span>Цена</span>
+                      {sortConfig.key === "price" && (
+                        <span className="ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th scope="col" className="w-20 px-2 py-3 text-center" onClick={() => requestSort("cashback_percent")}>
+                    <div className="flex items-center justify-center">
+                      <span>Кешбэк</span>
+                      {sortConfig.key === "cashback_percent" && (
+                        <span className="ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th scope="col" className="w-16 px-2 py-3 text-center" onClick={() => requestSort("is_active")}>
+                    <div className="flex items-center justify-center">
+                      <span>Статус</span>
+                      {sortConfig.key === "is_active" && (
+                        <span className="ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th scope="col" className="w-20 px-2 py-3 text-center" onClick={() => requestSort("is_hidden")}>
+                    <div className="flex items-center justify-center">
+                      <span>Видим</span>
+                      {sortConfig.key === "is_hidden" && (
+                        <span className="ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th scope="col" className="w-24 px-2 py-3 text-center">Действия</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700 bg-gray-800' : 'divide-gray-200 bg-white'}`}>
+                {sortedGoods.map((item) => (
+                  <tr 
+                    key={item.id} 
+                    className={`
+                      ${isDarkMode 
+                        ? item.is_hidden ? 'bg-gray-900 hover:bg-gray-800' : 'hover:bg-gray-700' 
+                        : item.is_hidden ? 'bg-gray-100 hover:bg-gray-200' : 'hover:bg-gray-50'}
+                      ${highlightedGoodsId === parseInt(item.id) ? 'border-l-4 border-blue-500' : ''}
+                    `}
+                    id={`goods-row-${item.id}`}
+                  >
+                    <td className="px-2 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedGoods.has(parseInt(item.id))}
+                        onChange={() => handleSelectItem(parseInt(item.id))}
+                        className="rounded border-gray-300"
+                      />
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <div className="flex items-center justify-center h-12 w-12 mx-auto overflow-hidden rounded">
+                        <img 
+                          src={item.image} 
+                          alt={item.name}
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            e.target.onerror = null;
+                            e.target.src = "https://via.placeholder.com/80?text=Нет+фото";
+                          }}
+                        />
+                      </div>
+                    </td>
+                    <td className={`px-2 py-2 text-center text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                      {item.id}
+                    </td>
+                    <td className={`px-2 py-2 text-sm font-medium truncate ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                      <div className="truncate" title={item.name}>
+                        {item.name}
+                      </div>
+                    </td>
+                    <td className={`px-2 py-2 text-sm truncate ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                      {item.category ? (
+                        <span className={`px-1 py-0.5 text-xs rounded truncate inline-block max-w-full ${
+                          isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-800'
+                        }`} title={item.category.name}>
+                          {item.category.name}
+                        </span>
+                      ) : (
+                        <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                          Нет
+                        </span>
+                      )}
+                    </td>
+                    <td className={`px-2 py-2 text-sm truncate ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                      <div className="truncate" title={item.article}>
+                        {item.article}
+                      </div>
+                    </td>
+                    <td className={`px-2 py-2 text-right text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                      {item.price} ₽
+                    </td>
+                    <td className={`px-2 py-2 text-center text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                      {item.cashback_percent}%
+                    </td>
+                    <td className={`px-2 py-2 text-center text-sm`}>
+                      <span className={`inline-block px-1.5 py-0.5 text-xs rounded ${
+                        item.is_active
+                          ? isDarkMode ? 'bg-green-800 text-green-100' : 'bg-green-100 text-green-800'
+                          : isDarkMode ? 'bg-red-800 text-red-100' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {item.is_active ? 'Да' : 'Нет'}
+                      </span>
+                    </td>
+                    <td className={`px-2 py-2 text-center text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                      {item.is_hidden ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500 mx-auto" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
+                          <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 mx-auto" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                          <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 text-center text-sm">
+                      <div className="flex justify-center space-x-2">
+                        <Link
+                          to={`/admin/goods/edit/${item.id}`}
+                          className={`${isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-900'}`}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                          </svg>
+                        </Link>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          className={`${isDarkMode ? 'text-red-400 hover:text-red-300' : 'text-red-600 hover:text-red-900'}`}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Infinite scroll loader */}
       <div 
         ref={loaderRef} 
         style={{ height: '50px', margin: '20px 0' }}
