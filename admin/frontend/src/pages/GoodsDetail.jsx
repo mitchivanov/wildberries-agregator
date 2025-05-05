@@ -7,16 +7,19 @@ import toast from 'react-hot-toast';
 const GoodsDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getGoodsById, reserveGoods, loading, maskArticle } = useApi();
+  const { getGoodsById, reserveGoods, loading, maskArticle, getUserDailyReservationsCount } = useApi();
   const { isDarkMode, webApp, user } = useTelegram();
   
   const [goods, setGoods] = useState(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [availableToday, setAvailableToday] = useState(0);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [dailyReservationsCount, setDailyReservationsCount] = useState(0);
+  const [dailyLimitExceeded, setDailyLimitExceeded] = useState(false);
   
   useEffect(() => {
     loadGoodsDetails();
+    checkDailyLimit();
     
     // Настраиваем кнопку "Назад" в WebApp Telegram
     if (webApp) {
@@ -29,6 +32,22 @@ const GoodsDetail = () => {
       };
     }
   }, [webApp, navigate, id]);
+  
+  const checkDailyLimit = async () => {
+    if (user && user.id) {
+      try {
+        const count = await getUserDailyReservationsCount(user.id);
+        setDailyReservationsCount(count);
+        setDailyLimitExceeded(count >= 2); // Лимит в 2 бронирования
+        
+        if (count >= 2) {
+          console.log(`Пользователь ${user.id} достиг дневного лимита бронирований: ${count}`);
+        }
+      } catch (error) {
+        console.error('Ошибка при проверке лимита бронирований:', error);
+      }
+    }
+  };
   
   const loadGoodsDetails = async () => {
     try {
@@ -62,11 +81,27 @@ const GoodsDetail = () => {
       toast.error('Для бронирования товара необходимо открыть приложение через Telegram');
       return;
     }
+    
+    // Проверяем превышение лимита бронирований
+    if (dailyLimitExceeded) {
+      toast.error('На сегодня Вы истратили весь лимит заказов. Сможете заказать другой аромат уже завтра.');
+      return;
+    }
+    
     setShowConfirmation(true);
   };
   
   const handleReserve = async () => {
     try {
+      // Еще раз проверяем лимит бронирований перед отправкой запроса
+      await checkDailyLimit();
+      
+      if (dailyLimitExceeded) {
+        toast.error('На сегодня Вы истратили весь лимит заказов. Сможете заказать другой аромат уже завтра.');
+        setShowConfirmation(false);
+        return;
+      }
+      
       // Всегда бронируем 1 товар
       const result = await reserveGoods(goods.id, 1);
       
@@ -76,6 +111,10 @@ const GoodsDetail = () => {
         setShowConfirmation(false);
         return;
       }
+      
+      // Обновляем счетчик бронирований после успешного бронирования
+      setDailyReservationsCount(prev => prev + 1);
+      setDailyLimitExceeded(dailyReservationsCount + 1 >= 2);
       
       setShowConfirmation(false);
       setShowInstructions(true);

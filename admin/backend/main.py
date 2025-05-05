@@ -1338,6 +1338,30 @@ async def bulk_show_goods(
             detail=f"Ошибка при отображении товаров: {str(e)}"
         )
 
+@app.get("/user/{user_id}/daily_reservations_count/")
+async def get_user_daily_reservations_count(
+    user_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить количество бронирований пользователя за текущий день"""
+    logger.info(f"Запрос количества бронирований пользователя {user_id} за текущий день")
+    
+    # Получаем текущую дату (только дата, без времени)
+    current_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Запрос для подсчета бронирований за текущий день
+    query = select(func.count(Reservation.id)).where(
+        Reservation.user_id == user_id,
+        func.date(Reservation.reserved_at) == current_date.date()
+    )
+    
+    result = await db.execute(query)
+    count = result.scalar()
+    
+    logger.info(f"Пользователь {user_id} имеет {count} бронирований за сегодня")
+    
+    return {"count": count}
+
 # Для тестирования приложения
 if __name__ == "__main__":
     import uvicorn

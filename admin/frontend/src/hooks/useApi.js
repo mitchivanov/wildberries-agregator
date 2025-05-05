@@ -8,7 +8,7 @@ const VITE_API_URL = import.meta.env.VITE_API_URL;
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: 'https://develooper.ru/api',
+  baseURL: 'https://develooper.ru/api', //'https://lobster-civil-pigeon.ngrok-free.app/api'
   headers: {
     'Content-Type': 'application/json',
   },
@@ -515,6 +515,20 @@ export const useApi = () => {
     }
   }, [request]);
 
+  // Добавляем функцию для получения количества бронирований пользователя за день
+  const getUserDailyReservationsCount = useCallback(async (userId) => {
+    console.log(`Запрос количества бронирований пользователя ${userId} за день`);
+    try {
+      const response = await api.get(`/user/${userId}/daily_reservations_count/`);
+      console.log('Результат запроса количества бронирований:', response.data);
+      return response.data.count || 0;
+    } catch (error) {
+      console.error('Ошибка при получении количества бронирований:', error);
+      toast.error(`Не удалось получить информацию о лимитах: ${error.message}`);
+      return 0; // В случае ошибки считаем, что бронирований нет
+    }
+  }, []);
+
   return {
     loading,
     error,
@@ -535,6 +549,7 @@ export const useApi = () => {
     createCategory,
     updateCategory,
     bulkHideGoods,
-    bulkShowGoods
+    bulkShowGoods,
+    getUserDailyReservationsCount
   };
 }; 
