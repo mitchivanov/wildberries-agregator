@@ -458,6 +458,8 @@ async def process_broadcast_datetime(message: types.Message, state: FSMContext):
         try:
             # Парсим введенную дату и время
             scheduled_time = datetime.strptime(text, "%d.%m.%Y %H:%M")
+            # Делаем время aware, привязывая его к московскому TZ
+            scheduled_time = MOSCOW_TZ.localize(scheduled_time)
             
             # Проверяем, что дата в будущем
             if scheduled_time <= now:
