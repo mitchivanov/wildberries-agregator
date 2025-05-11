@@ -154,6 +154,16 @@ services:
       - "9121:9121"
     environment:
       - REDIS_ADDR=redis://redis:6379/0
+      - REDIS_EXPORTER_CHECK_KEYS=*
+      - REDIS_EXPORTER_INCL_SYSTEM_METRICS=true
+      - REDIS_EXPORTER_EXPORT_CLIENT_LIST=true
+      - REDIS_EXPORTER_IS_CLUSTER=false
+      - DEBUG=1
+    command:
+      - '--include-system-metrics'
+      - '--log-format=txt'
+      - '--namespace=redis'
+      - '--check-keys=*'
     depends_on:
       - redis
 
