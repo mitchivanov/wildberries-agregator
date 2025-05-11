@@ -1,6 +1,7 @@
 import os
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from fastapi import FastAPI, Request
 import uvicorn
 import logging
@@ -8,7 +9,10 @@ import logging
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(
+    token=TELEGRAM_BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher()
 app = FastAPI()
 
@@ -32,9 +36,9 @@ async def alertmanager_webhook(alert: dict):
             status = a.get("status")
             labels = a.get("labels", {})
             annotations = a.get("annotations", {})
-            message = f"*{labels.get('alertname', 'Alert')}*\nСтатус: {status}\n{annotations.get('summary', '')}\n{annotations.get('description', '')}"
+            message = f"<b>{labels.get('alertname', 'Alert')}</b>\nСтатус: {status}\n{annotations.get('summary', '')}\n{annotations.get('description', '')}"
             try:
-                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode="Markdown")
+                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
                 logger.info(f"Успешно отправлено в Telegram: {message}")
             except Exception as e:
                 logger.error(f"Ошибка при отправке в Telegram: {e}")
