@@ -127,9 +127,59 @@ services:
       - backend-network
     restart: always
 
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - redis-exporter
+      - alertmanager
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      - redis
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+
+  alert-telegram-bot:
+    build: ./alert-telegram-bot
+    environment:
+      - TELEGRAM_BOT_TOKEN=${ALERT_TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${ALERT_TELEGRAM_CHAT_ID}
+    ports:
+      - "8081:8081"
+    depends_on:
+      - alertmanager
+
 volumes:
   postgres_data:
-
+  prometheus_data:
+  grafana_data:
 
 networks:
   backend-network:

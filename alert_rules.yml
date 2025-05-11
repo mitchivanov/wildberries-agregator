@@ -1,0 +1,19 @@
+groups:
+- name: redis_alerts
+  rules:
+  - alert: RedisDown
+    expr: redis_up == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Redis instance is down"
+      description: "Redis на {{ $labels.instance }} не отвечает."
+  - alert: RedisNotMaster
+    expr: redis_instance_is_master == 0
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Redis is not master"
+      description: "Redis на {{ $labels.instance }} не master." 
