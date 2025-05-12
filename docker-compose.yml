@@ -166,6 +166,9 @@ services:
       - '--check-keys=*'
     depends_on:
       - redis
+    networks:
+      - backend-network
+      - default
 
   alertmanager:
     image: prom/alertmanager:latest
