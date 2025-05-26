@@ -21,21 +21,18 @@ ENV VITE_COMMIT_HASH=dev
 
 RUN npm run build
 
-FROM nginx:alpine
-# Передаем COMMIT_HASH со stage builder
-COPY --from=builder /commit_hash.txt /commit_hash.txt
-ENV VITE_COMMIT_HASH=dev
+# Финальный stage - создаем контейнер только для хранения статических файлов
+FROM alpine:latest
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /commit_hash.txt /commit_hash.txt
 
-# Создаем необходимую структуру директорий для Let's Encrypt
-RUN mkdir -p /etc/letsencrypt/live/libertylib.online
+# Создаем entrypoint для обновления версии в файлах
+RUN echo '#!/bin/sh' > /entrypoint.sh && \
+    echo 'export VITE_COMMIT_HASH=$(cat /commit_hash.txt)' >> /entrypoint.sh && \
+    echo 'if [ -f /usr/share/nginx/html/index.html ]; then' >> /entrypoint.sh && \
+    echo '  envsubst "\${VITE_COMMIT_HASH}" < /usr/share/nginx/html/index.html > /tmp/index.html && mv /tmp/index.html /usr/share/nginx/html/index.html' >> /entrypoint.sh && \
+    echo 'fi' >> /entrypoint.sh && \
+    echo 'tail -f /dev/null' >> /entrypoint.sh && \
+    chmod +x /entrypoint.sh
 
-# Создаем скрипт для замены версии
-RUN echo '#!/bin/sh' > /docker-entrypoint.d/40-set-version.sh && \
-    echo 'export VITE_COMMIT_HASH=$(cat /commit_hash.txt)' >> /docker-entrypoint.d/40-set-version.sh && \
-    echo 'envsubst "\${VITE_COMMIT_HASH}" < /usr/share/nginx/html/index.html > /tmp/index.html && mv /tmp/index.html /usr/share/nginx/html/index.html' >> /docker-entrypoint.d/40-set-version.sh && \
-    chmod +x /docker-entrypoint.d/40-set-version.sh
-
-EXPOSE 80
-EXPOSE 443
+ENTRYPOINT ["/entrypoint.sh"]

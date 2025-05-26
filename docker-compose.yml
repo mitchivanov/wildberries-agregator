@@ -41,6 +41,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./logs:/app/logs
+    ports:
+      - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,11 +62,8 @@ services:
         - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
         - VITE_TELEGRAM_WEBAPP_URL=${VITE_TELEGRAM_WEBAPP_URL}
     volumes:
-      # Монтируем сертификаты из хост-системы
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    ports:
-      - "80:80"
-      - "443:443"
+      # Монтируем статические файлы для системного nginx
+      - frontend_static:/usr/share/nginx/html
     depends_on:
       - backend
     networks:
@@ -191,6 +190,7 @@ volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+  frontend_static:
 
 networks:
   backend-network:
