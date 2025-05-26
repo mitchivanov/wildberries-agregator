@@ -23,6 +23,7 @@ RUN npm run build
 
 # Финальный stage - создаем контейнер только для хранения статических файлов
 FROM alpine:latest
+RUN apk add --no-cache gettext
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY --from=builder /commit_hash.txt /commit_hash.txt
 
