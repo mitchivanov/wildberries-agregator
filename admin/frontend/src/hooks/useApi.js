@@ -82,19 +82,25 @@ export const useApi = () => {
     }
   }, []);
 
-  // Получение всех товаров с пагинацией
+  // Получение всех товаров с пагинацией и сортировкой
   const getGoods = useCallback(async (params = {}) => {
-    // params: { skip, limit, includeHidden }
-    const { skip = 0, limit = 100, includeHidden = true } = params;
+    // params: { skip, limit, includeHidden, sortBy, sortOrder }
+    const { skip = 0, limit = 100, includeHidden = true, sortBy, sortOrder = 'asc' } = params;
     
     // Добавляем логирование для отладки
-    console.log(`Запрос товаров: skip=${skip}, limit=${limit}, includeHidden=${includeHidden}`);
+    console.log(`Запрос товаров: skip=${skip}, limit=${limit}, includeHidden=${includeHidden}, sortBy=${sortBy}, sortOrder=${sortOrder}`);
     
     // Используем URLSearchParams для правильного форматирования параметров запроса
     const searchParams = new URLSearchParams();
     searchParams.append('skip', skip);
     searchParams.append('limit', limit);
     searchParams.append('include_hidden', includeHidden);
+    
+    // Добавляем параметры сортировки, если они указаны
+    if (sortBy) {
+      searchParams.append('sort_by', sortBy);
+      searchParams.append('sort_order', sortOrder);
+    }
     
     const url = `/goods/?${searchParams.toString()}`;
     console.log(`URL запроса: ${url}`);
@@ -149,18 +155,24 @@ export const useApi = () => {
     }
   }, [request]);
 
-  // Поиск товаров с пагинацией
+  // Поиск товаров с пагинацией и сортировкой
   const searchGoods = useCallback(async (query, params = {}) => {
-    const { skip = 0, limit = 100 } = params;
+    const { skip = 0, limit = 100, sortBy, sortOrder = 'asc' } = params;
     
     // Добавляем логирование для отладки поиска
-    console.log(`Поиск товаров: query=${query}, skip=${skip}, limit=${limit}`);
+    console.log(`Поиск товаров: query=${query}, skip=${skip}, limit=${limit}, sortBy=${sortBy}, sortOrder=${sortOrder}`);
     
     // Используем URLSearchParams для правильного форматирования параметров запроса
     const searchParams = new URLSearchParams();
     searchParams.append('search', query);
     searchParams.append('skip', skip);
     searchParams.append('limit', limit);
+    
+    // Добавляем параметры сортировки, если они указаны
+    if (sortBy) {
+      searchParams.append('sort_by', sortBy);
+      searchParams.append('sort_order', sortOrder);
+    }
     
     const url = `/goods/?${searchParams.toString()}`;
     console.log(`URL запроса поиска: ${url}`);
@@ -529,6 +541,22 @@ export const useApi = () => {
     }
   }, []);
 
+  // Добавляем функцию для ручной перегенерации доступности товара (для отладки)
+  const regenerateAvailability = useCallback(async (goodsId) => {
+    console.log(`🔧 Запрос на перегенерацию доступности для товара ${goodsId}`);
+    try {
+      const response = await api.post(`/goods/${goodsId}/regenerate-availability/`);
+      console.log('✅ Результат перегенерации:', response.data);
+      toast.success(`Доступность товара перегенерирована: ${response.data.records_created} записей`);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Ошибка при перегенерации доступности:', error);
+      const errorMessage = error.response?.data?.detail || error.message;
+      toast.error(`Ошибка при перегенерации доступности: ${errorMessage}`);
+      throw error;
+    }
+  }, []);
+
   return {
     loading,
     error,
@@ -550,6 +578,7 @@ export const useApi = () => {
     updateCategory,
     bulkHideGoods,
     bulkShowGoods,
-    getUserDailyReservationsCount
+    getUserDailyReservationsCount,
+    regenerateAvailability
   };
 }; 

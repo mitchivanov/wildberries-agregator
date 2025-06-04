@@ -18,6 +18,10 @@ const Catalog = () => {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [dailyReservationsCount, setDailyReservationsCount] = useState(0);
   const [dailyLimitExceeded, setDailyLimitExceeded] = useState(false);
+  const [currentQuery, setCurrentQuery] = useState(''); // Для хранения текущего поискового запроса
+  // Состояние для сортировки
+  const [sortBy, setSortBy] = useState('name'); // По умолчанию сортируем по названию
+  const [sortOrder, setSortOrder] = useState('asc'); // По умолчанию по возрастанию
 
   // Проверка лимита бронирований пользователя
   useEffect(() => {
@@ -54,6 +58,18 @@ const Catalog = () => {
     }
   }, [webApp, dailyLimitExceeded]);
 
+  // Добавляем useEffect для отслеживания изменений сортировки
+  useEffect(() => {
+    if (initialLoaded && !dailyLimitExceeded) {
+      // Перезагружаем данные при изменении сортировки
+      if (currentQuery) {
+        handleSearch(currentQuery); // Если есть поисковый запрос, используем поиск
+      } else {
+        loadGoods(); // Иначе загружаем все товары
+      }
+    }
+  }, [sortBy, sortOrder]);
+
   useEffect(() => {
     const loadCategories = async () => {
       try {
@@ -74,7 +90,11 @@ const Catalog = () => {
       // Показываем уведомление о загрузке
       const loadingToast = toast.loading('Загружаем товары, пожалуйста, подождите...');
       
-      const data = await getGoods();
+      // Передаем параметры сортировки в API запрос
+      const data = await getGoods({
+        sortBy,
+        sortOrder
+      });
       
       // Закрываем уведомление о загрузке
       toast.dismiss(loadingToast);
@@ -123,6 +143,8 @@ const Catalog = () => {
   };
 
   const handleSearch = async (query) => {
+    setCurrentQuery(query); // Сохраняем текущий поисковый запрос
+    
     if (!query.trim()) {
       return loadGoods();
     }
@@ -130,7 +152,11 @@ const Catalog = () => {
     setLoading(true);
     setIsSearching(true);
     try {
-      const data = await searchGoods(query);
+      // Передаем параметры сортировки в поисковый запрос
+      const data = await searchGoods(query, {
+        sortBy,
+        sortOrder
+      });
       console.log('Результаты поиска:', data);
       
       let availableGoods = [];
@@ -180,11 +206,11 @@ const Catalog = () => {
     setIsMenuOpen(false); // Закрываем меню после выбора
   };
   
-  // Обновим sortedGoods для учета фильтрации по категории
-  const sortedGoods = useMemo(() => {
+  // Обновленная функция для фильтрации по категории (БЕЗ сортировки на клиенте)
+  const filteredGoods = useMemo(() => {
     if (!goods || !goods.length) return [];
     
-    // Фильтрация по выбранной категории
+    // Только фильтрация по выбранной категории, БЕЗ сортировки
     let filteredGoods = [...goods];
     if (selectedCategory) {
       filteredGoods = filteredGoods.filter(item => 
@@ -192,27 +218,20 @@ const Catalog = () => {
       );
     }
     
-    return filteredGoods.sort((a, b) => {
-      const aAvailable = availabilityData[a.id] > 0 ? 1 : 0;
-      const bAvailable = availabilityData[b.id] > 0 ? 1 : 0;
-      
-      // Сначала сортируем по наличию товара (в наличии - выше)
-      if (aAvailable !== bAvailable) {
-        return bAvailable - aAvailable;
-      }
-      
-      // Если наличие одинаковое, то сортируем по количеству (больше - выше)
-      const aQuantity = availabilityData[a.id] || 0;
-      const bQuantity = availabilityData[b.id] || 0;
-      
-      if (aQuantity !== bQuantity) {
-        return bQuantity - aQuantity;
-      }
-      
-      // Если количество одинаковое, сортируем по названию
-      return a.name.localeCompare(b.name);
-    });
-  }, [goods, availabilityData, selectedCategory]);
+    return filteredGoods;
+  }, [goods, selectedCategory]);
+
+  // Функция для обработки изменения сортировки
+  const handleSortChange = (newSortBy) => {
+    if (sortBy === newSortBy) {
+      // Если поле не изменилось, меняем порядок сортировки
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      // Если поле изменилось, устанавливаем новое поле и порядок по возрастанию
+      setSortBy(newSortBy);
+      setSortOrder('asc');
+    }
+  };
 
   // Скелетон для отображения во время загрузки
   const LoadingSkeleton = () => {
@@ -362,6 +381,67 @@ const Catalog = () => {
 
             <SearchBar onSearch={handleSearch} isDarkMode={isDarkMode} />
 
+            {/* Панель управления сортировкой */}
+            <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow`}>
+              <div className="flex flex-wrap items-center gap-4">
+                <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  Сортировать по:
+                </span>
+                
+                {/* Кнопки сортировки */}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => handleSortChange('name')}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      sortBy === 'name'
+                        ? isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                        : isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Название {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  </button>
+                  
+                  <button
+                    onClick={() => handleSortChange('price')}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      sortBy === 'price'
+                        ? isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                        : isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Цена {sortBy === 'price' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  </button>
+                  
+                  <button
+                    onClick={() => handleSortChange('cashback_percent')}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      sortBy === 'cashback_percent'
+                        ? isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                        : isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Кэшбек {sortBy === 'cashback_percent' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  </button>
+                  
+                  <button
+                    onClick={() => handleSortChange('article')}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      sortBy === 'article'
+                        ? isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                        : isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Артикул {sortBy === 'article' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  </button>
+                </div>
+                
+                {/* Индикатор текущей сортировки */}
+                <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  {sortOrder === 'asc' ? 'По возрастанию' : 'По убыванию'}
+                </div>
+              </div>
+            </div>
+
             {/* Сообщение о загрузке - более заметное */}
             {loading && (
               <div className={`p-4 mb-6 rounded-lg text-center ${
@@ -399,7 +479,7 @@ const Catalog = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {sortedGoods.map((item) => (
+                {filteredGoods.map((item) => (
                   <Link
                     key={item.id}
                     to={`/goods/${item.id}`}

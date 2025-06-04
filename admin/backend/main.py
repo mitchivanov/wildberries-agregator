@@ -159,41 +159,79 @@ async def generate_daily_availability(db: AsyncSession, goods_id: int, start_dat
     Генерирует записи о доступности товара на каждый день в заданном диапазоне дат.
     Количество товара на день выбирается случайно между min_daily и max_daily.
     """
-    logger.info(f"Начинаем генерацию доступности для товара {goods_id}")
-    logger.info(f"Параметры: start_date={start_date}, end_date={end_date}, min_daily={min_daily}, max_daily={max_daily}")
+    logger.info(f"🔄 Начинаем генерацию доступности для товара {goods_id}")
+    logger.info(f"📅 Входящие параметры: start_date={start_date}, end_date={end_date}")
+    logger.info(f"📦 Количество: min_daily={min_daily}, max_daily={max_daily}")
+    
+    # Проверяем корректность min_daily и max_daily
+    if min_daily is None or min_daily <= 0:
+        logger.warning(f"⚠️ Некорректное значение min_daily={min_daily}, устанавливаем 1")
+        min_daily = 1
+    if max_daily is None or max_daily <= 0:
+        logger.warning(f"⚠️ Некорректное значение max_daily={max_daily}, устанавливаем 10")
+        max_daily = 10
+    if min_daily > max_daily:
+        logger.warning(f"⚠️ min_daily ({min_daily}) больше max_daily ({max_daily}), меняем местами")
+        min_daily, max_daily = max_daily, min_daily
     
     # Удаляем все существующие записи о доступности для этого товара
     # в будущем (от сегодняшнего дня)
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    logger.info(f"📆 Сегодняшняя дата (для очистки): {today}")
+    
     delete_stmt = delete(DailyAvailability).where(
         DailyAvailability.goods_id == goods_id,
         DailyAvailability.date >= today
     )
-    await db.execute(delete_stmt)
-    logger.info(f"Удалены существующие записи доступности для товара {goods_id}")
+    result = await db.execute(delete_stmt)
+    deleted_count = result.rowcount
+    logger.info(f"🗑️ Удалено {deleted_count} существующих записей доступности для товара {goods_id}")
     
-    # Если не указаны даты начала или окончания, используем сегодня и +30 дней
-    if not start_date:
-        logger.info("Дата начала не указана, используем сегодня")
+    # Обработка дат
+    if start_date is None:
+        logger.info("📅 Дата начала не указана, используем сегодня")
         start_date = today
-    if not end_date:
-        logger.info("Дата окончания не указана, используем сегодня + 30 дней")
-        end_date = today + timedelta(days=30)
+    else:
+        # Приведение start_date к формату без часового пояса
+        if start_date.tzinfo:
+            start_date = start_date.replace(tzinfo=None)
+        # Устанавливаем время на начало дня
+        start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        logger.info(f"📅 Обработанная дата начала: {start_date}")
     
-    # Приведение дат к одному формату (без часового пояса)
-    if start_date and start_date.tzinfo:
-        start_date = start_date.replace(tzinfo=None)
-    if end_date and end_date.tzinfo:
-        end_date = end_date.replace(tzinfo=None)
+    if end_date is None:
+        logger.info("📅 Дата окончания не указана, используем сегодня + 30 дней")
+        end_date = today + timedelta(days=30)
+    else:
+        # Приведение end_date к формату без часового пояса
+        if end_date.tzinfo:
+            end_date = end_date.replace(tzinfo=None)
+        # Устанавливаем время на конец дня
+        end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        logger.info(f"📅 Обработанная дата окончания: {end_date}")
     
     # Гарантируем, что start_date не раньше сегодняшнего дня
-    start_date = max(start_date, today)
-    logger.info(f"Итоговые даты: start_date={start_date}, end_date={end_date}")
+    if start_date < today:
+        logger.info(f"📅 start_date ({start_date}) раньше сегодня, корректируем на {today}")
+        start_date = today
+    
+    # Проверяем, что end_date не раньше start_date
+    if end_date < start_date:
+        logger.warning(f"⚠️ end_date ({end_date}) раньше start_date ({start_date}), корректируем")
+        end_date = start_date + timedelta(days=30)
+        logger.info(f"📅 Скорректированная end_date: {end_date}")
+    
+    logger.info(f"📅 Итоговые даты для генерации: start_date={start_date}, end_date={end_date}")
     
     # Создаем новые записи для каждого дня
     count = 0
     current_date = start_date
-    while current_date <= end_date:
+    
+    # Для избежания бесконечного цикла, ограничиваем максимальное количество дней
+    max_days = 365  # Максимум год
+    days_processed = 0
+    
+    while current_date <= end_date and days_processed < max_days:
         # Генерируем случайное количество товара на день
         available_quantity = random.randint(min_daily, max_daily)
         
@@ -205,31 +243,108 @@ async def generate_daily_availability(db: AsyncSession, goods_id: int, start_dat
         )
         db.add(daily_availability)
         count += 1
+        days_processed += 1
+        
+        # Логируем каждый 10-й день для контроля
+        if count % 10 == 0 or count <= 5:
+            logger.debug(f"📦 День {count}: {current_date.strftime('%Y-%m-%d')} -> {available_quantity} шт.")
         
         # Переходим к следующему дню
         current_date += timedelta(days=1)
     
+    # Проверяем на превышение лимита
+    if days_processed >= max_days:
+        logger.warning(f"⚠️ Достигнут лимит дней ({max_days}), прерываем генерацию")
+    
     await db.commit()
-    logger.info(f"Сгенерировано {count} записей доступности для товара {goods_id} с {start_date} по {end_date}")
+    logger.info(f"✅ Сгенерировано {count} записей доступности для товара {goods_id}")
+    logger.info(f"📊 Период: с {start_date.strftime('%Y-%m-%d')} по {(current_date - timedelta(days=1)).strftime('%Y-%m-%d')}")
+    
+    return count
+
+# Добавляем endpoint для ручной перегенерации доступности (для отладки)
+@app.post("/goods/{goods_id}/regenerate-availability/")
+async def regenerate_availability(goods_id: int, db: AsyncSession = Depends(get_db)):
+    """Ручная перегенерация доступности для товара (для отладки)"""
+    logger.info(f"🔧 Запрос на ручную перегенерацию доступности для товара {goods_id}")
+    
+    # Получаем товар
+    result = await db.execute(select(Goods).filter(Goods.id == goods_id))
+    goods = result.scalars().first()
+    
+    if not goods:
+        logger.error(f"❌ Товар {goods_id} не найден")
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    
+    logger.info(f"📋 Товар найден: {goods.name}")
+    logger.info(f"📅 Даты товара: start_date={goods.start_date}, end_date={goods.end_date}")
+    logger.info(f"📦 Количество: min_daily={goods.min_daily}, max_daily={goods.max_daily}")
+    
+    try:
+        # Перегенерируем доступность
+        count = await generate_daily_availability(
+            db, 
+            goods.id, 
+            goods.start_date, 
+            goods.end_date, 
+            goods.min_daily, 
+            goods.max_daily
+        )
+        
+        logger.info(f"✅ Успешно перегенерировано {count} записей для товара {goods_id}")
+        
+        return {
+            "message": f"Доступность успешно перегенерирована",
+            "goods_id": goods_id,
+            "goods_name": goods.name,
+            "records_created": count,
+            "start_date": goods.start_date,
+            "end_date": goods.end_date,
+            "min_daily": goods.min_daily,
+            "max_daily": goods.max_daily
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка при перегенерации доступности для товара {goods_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Ошибка при перегенерации доступности: {str(e)}"
+        )
 
 # CRUD маршруты
 @app.post("/goods/", response_model=GoodsResponse, status_code=status.HTTP_201_CREATED)
 async def create_goods(goods: GoodsCreate, db: AsyncSession = Depends(get_db)):
     """Создать новый товар и сгенерировать доступность по дням"""
+    logger.info(f"🛒 Создание нового товара: {goods.name}")
+    logger.info(f"📅 Даты: start_date={goods.start_date}, end_date={goods.end_date}")
+    logger.info(f"📦 Количество: min_daily={goods.min_daily}, max_daily={goods.max_daily}")
+    
     db_goods = Goods(**goods.dict())
     db.add(db_goods)
     await db.commit()
     await db.refresh(db_goods)
     
+    logger.info(f"✅ Товар создан с ID: {db_goods.id}")
+    
     # Генерируем доступность товара по дням
-    await generate_daily_availability(
-        db, 
-        db_goods.id, 
-        db_goods.start_date, 
-        db_goods.end_date, 
-        db_goods.min_daily, 
-        db_goods.max_daily
-    )
+    try:
+        availability_count = await generate_daily_availability(
+            db, 
+            db_goods.id, 
+            db_goods.start_date, 
+            db_goods.end_date, 
+            db_goods.min_daily, 
+            db_goods.max_daily
+        )
+        
+        if availability_count == 0:
+            logger.warning(f"⚠️ Не создано ни одной записи доступности для товара {db_goods.id}")
+        else:
+            logger.info(f"✅ Создано {availability_count} записей доступности для товара {db_goods.id}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка при генерации доступности для товара {db_goods.id}: {str(e)}")
+        # Не прерываем создание товара, но логируем ошибку
     
     # Загружаем созданную доступность отдельным запросом
     availability_query = select(DailyAvailability).filter(
@@ -238,6 +353,8 @@ async def create_goods(goods: GoodsCreate, db: AsyncSession = Depends(get_db)):
     
     availability_result = await db.execute(availability_query)
     availability = availability_result.scalars().all()
+    
+    logger.info(f"📊 Загружено {len(availability)} записей доступности из базы")
     
     # Создаем словарь с данными товара для ответа
     goods_dict = {
@@ -268,6 +385,8 @@ async def create_goods(goods: GoodsCreate, db: AsyncSession = Depends(get_db)):
         "reservations": []
     }
     
+    logger.info(f"🎉 Товар '{db_goods.name}' успешно создан с {len(availability)} записями доступности")
+    
     return goods_dict
 
 @app.get("/goods/", response_model=dict, dependencies=[Depends(verify_telegram_user)])
@@ -276,11 +395,13 @@ async def read_goods(
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
-    include_hidden: bool = False
+    include_hidden: bool = False,
+    sort_by: Optional[str] = Query(None, description="Поле для сортировки: name, price, cashback_percent, article, created_at"),
+    sort_order: Optional[str] = Query("asc", description="Порядок сортировки: asc или desc")
 ):
-    """Получить список всех товаров с фильтрацией и пагинацией"""
+    """Получить список всех товаров с фильтрацией, пагинацией и сортировкой"""
     try:
-        logger.info(f"Запрос товаров: search={search}, include_hidden={include_hidden}, skip={skip}, limit={limit}")
+        logger.info(f"Запрос товаров: search={search}, include_hidden={include_hidden}, skip={skip}, limit={limit}, sort_by={sort_by}, sort_order={sort_order}")
         base_query = select(Goods)
         # Применяем поиск, если указан
         if search:
@@ -294,6 +415,34 @@ async def read_goods(
         # Фильтруем скрытые товары только если include_hidden=False
         if not include_hidden:
             base_query = base_query.where(Goods.is_hidden == False)
+        
+        # Добавляем сортировку
+        if sort_by:
+            # Определяем поле для сортировки
+            sort_field = None
+            if sort_by == "name":
+                sort_field = Goods.name
+            elif sort_by == "price":
+                sort_field = Goods.price
+            elif sort_by == "cashback_percent":
+                sort_field = Goods.cashback_percent
+            elif sort_by == "article":
+                sort_field = Goods.article
+            elif sort_by == "created_at":
+                sort_field = Goods.created_at
+            else:
+                # По умолчанию сортируем по имени, если поле неизвестно
+                sort_field = Goods.name
+                logger.warning(f"Неизвестное поле для сортировки: {sort_by}, использую name")
+            
+            # Применяем порядок сортировки
+            if sort_order.lower() == "desc":
+                base_query = base_query.order_by(sort_field.desc())
+            else:
+                base_query = base_query.order_by(sort_field.asc())
+        else:
+            # По умолчанию сортируем по имени
+            base_query = base_query.order_by(Goods.name.asc())
         
         # Считаем total - исправляем запрос
         try:
@@ -536,6 +685,8 @@ async def read_goods(goods_id: int, db: AsyncSession = Depends(get_db)):
 @app.put("/goods/{goods_id}", response_model=GoodsResponse)
 async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession = Depends(get_db)):
     """Обновить товар по ID"""
+    logger.info(f"🔄 Обновление товара {goods_id}")
+    
     # Проверяем существование товара
     result = await db.execute(select(Goods).filter(Goods.id == goods_id))
     goods = result.scalars().first()
@@ -543,10 +694,14 @@ async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession 
     if goods is None:
         raise HTTPException(status_code=404, detail="Товар не найден")
     
+    logger.info(f"📋 Товар найден: {goods.name}")
+    
     # Фильтруем только заполненные поля для обновления
     update_data = {k: v for k, v in goods_data.dict().items() if v is not None}
     
+    # Логируем, какие поля обновляются
     if update_data:
+        logger.info(f"📝 Обновляемые поля: {list(update_data.keys())}")
         await db.execute(
             update(Goods)
             .where(Goods.id == goods_id)
@@ -560,15 +715,28 @@ async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession 
     updated_goods = result.scalars().first()
     
     # Перегенерируем доступность товара по дням, если изменились даты или мин/макс значения
-    if any(field in update_data for field in ['start_date', 'end_date', 'min_daily', 'max_daily']):
-        await generate_daily_availability(
-            db, 
-            updated_goods.id, 
-            updated_goods.start_date, 
-            updated_goods.end_date, 
-            updated_goods.min_daily, 
-            updated_goods.max_daily
-        )
+    availability_fields = ['start_date', 'end_date', 'min_daily', 'max_daily']
+    if any(field in update_data for field in availability_fields):
+        logger.info(f"🔄 Обнаружены изменения в полях доступности: {[f for f in availability_fields if f in update_data]}")
+        
+        try:
+            availability_count = await generate_daily_availability(
+                db, 
+                updated_goods.id, 
+                updated_goods.start_date, 
+                updated_goods.end_date, 
+                updated_goods.min_daily, 
+                updated_goods.max_daily
+            )
+            
+            if availability_count == 0:
+                logger.warning(f"⚠️ Не создано ни одной записи доступности для товара {updated_goods.id} после обновления")
+            else:
+                logger.info(f"✅ Перегенерировано {availability_count} записей доступности для товара {updated_goods.id}")
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка при перегенерации доступности для товара {updated_goods.id}: {str(e)}")
+            # Не прерываем обновление товара, но логируем ошибку
     
     # Загружаем связанные данные
     availability_query = select(DailyAvailability).filter(DailyAvailability.goods_id == goods_id)
@@ -578,6 +746,8 @@ async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession 
     reservations_query = select(Reservation).filter(Reservation.goods_id == goods_id)
     reservations_result = await db.execute(reservations_query)
     reservations = reservations_result.scalars().all()
+    
+    logger.info(f"📊 Загружено из базы: {len(availability)} записей доступности, {len(reservations)} бронирований")
     
     # Формируем полный ответ как в методе read_goods
     goods_dict = {
@@ -623,6 +793,8 @@ async def update_goods(goods_id: int, goods_data: GoodsUpdate, db: AsyncSession 
             "is_active": updated_goods.category.is_active
         } if updated_goods.category else None
     }
+    
+    logger.info(f"🎉 Товар '{updated_goods.name}' успешно обновлен с {len(availability)} записями доступности")
     
     return goods_dict
 
