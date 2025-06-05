@@ -557,6 +557,47 @@ export const useApi = () => {
     }
   }, []);
 
+  // Получение каталога товаров (только доступные для клиентов)
+  const getCatalog = useCallback(async (params = {}) => {
+    const { sortBy, sortOrder = 'asc' } = params;
+    
+    console.log(`Запрос каталога товаров: sortBy=${sortBy}, sortOrder=${sortOrder}`);
+    
+    // Используем URLSearchParams для правильного форматирования параметров запроса
+    const searchParams = new URLSearchParams();
+    
+    // Добавляем параметры сортировки, если они указаны
+    if (sortBy) {
+      searchParams.append('sort_by', sortBy);
+      searchParams.append('sort_order', sortOrder);
+    }
+    
+    const url = searchParams.toString() ? `/catalog/?${searchParams.toString()}` : '/catalog/';
+    console.log(`URL запроса каталога: ${url}`);
+    
+    try {
+      setLoading(true);
+      const response = await api({
+        method: 'get',
+        url,
+      });
+      
+      // Каталог возвращает массив товаров напрямую
+      const data = response.data;
+      console.log(`Получено товаров из каталога: ${data?.length || 0}`);
+      
+      return data || [];
+    } catch (error) {
+      const errorMessage = error.response?.data?.detail || error.message;
+      setError(errorMessage);
+      toast.error(`Ошибка при загрузке каталога: ${errorMessage}`);
+      
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   return {
     loading,
     error,
@@ -579,6 +620,7 @@ export const useApi = () => {
     bulkHideGoods,
     bulkShowGoods,
     getUserDailyReservationsCount,
-    regenerateAvailability
+    regenerateAvailability,
+    getCatalog
   };
 }; 

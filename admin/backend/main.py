@@ -847,6 +847,8 @@ async def clean_expired_availability(db: AsyncSession):
 @app.get("/catalog/", response_model=List[GoodsResponse])
 async def get_catalog(
     current_date: Optional[datetime] = None,
+    sort_by: Optional[str] = Query(None, description="Поле для сортировки: name, price, cashback_percent, article"),
+    sort_order: Optional[str] = Query("asc", description="Порядок сортировки: asc или desc"),
     db: AsyncSession = Depends(get_db)
 ):
     """Получить список доступных товаров на текущую дату"""
@@ -857,34 +859,47 @@ async def get_catalog(
         # Автоматически очищаем устаревшие записи
         await clean_expired_availability(db)
         
-        # Добавляем условие is_hidden=False и загрузку связанных данных
+        # Получаем текущую дату без времени
+        current_date_only = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        logger.info(f"📱 Catalog: Запрос каталога на дату {current_date_only}")
+        
+        # Создаем подзапрос для товаров с доступностью на сегодня
+        availability_subquery = select(DailyAvailability.goods_id).where(
+            DailyAvailability.date == current_date_only,
+            DailyAvailability.available_quantity > 0
+        ).subquery()
+        
+        # Основной запрос - получаем только товары с доступностью
         query = select(Goods).options(
             selectinload(Goods.daily_availability),
             selectinload(Goods.category),
-            selectinload(Goods.reservations)  # Добавляем загрузку резерваций
+            selectinload(Goods.reservations)
         ).where(
             Goods.is_active == True,
             Goods.is_hidden == False,
             Goods.start_date <= current_date,
-            Goods.end_date >= current_date
+            Goods.end_date >= current_date,
+            Goods.id.in_(select(availability_subquery))  # Только товары с доступностью
         )
+        
+        # Применяем сортировку
+        if sort_by:
+            sort_column = getattr(Goods, sort_by, None)
+            if sort_column:
+                if sort_order == "desc":
+                    query = query.order_by(sort_column.desc())
+                else:
+                    query = query.order_by(sort_column.asc())
+            else:
+                logger.warning(f"Неизвестное поле для сортировки: {sort_by}")
         
         result = await db.execute(query)
         goods = result.scalars().all()
         
-        # Проверяем наличие доступных товаров на текущую дату
-        available_goods = []
-        for item in goods:
-            availability_query = select(DailyAvailability).where(
-                DailyAvailability.goods_id == item.id,
-                DailyAvailability.date == current_date.replace(hour=0, minute=0, second=0, microsecond=0),
-                DailyAvailability.available_quantity > 0
-            )
-            availability_result = await db.execute(availability_query)
-            if availability_result.scalars().first():
-                available_goods.append(item)
+        logger.info(f"📱 Catalog: Найдено {len(goods)} доступных товаров")
         
-        return available_goods
+        return goods
     except Exception as e:
         logger.error(f"Ошибка при получении каталога: {str(e)}")
         raise HTTPException(
@@ -1079,6 +1094,7 @@ async def read_all_availability(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     goods_id: Optional[int] = None,
+    include_past: bool = False,  # Новый параметр для включения прошлых дат
     db: AsyncSession = Depends(get_db)
 ):
     """Получить данные о доступности всех товаров с возможностью фильтрации"""
@@ -1090,12 +1106,12 @@ async def read_all_availability(
     # Проверяем, можем ли мы использовать кэш
     if (_availability_cache is not None and 
         current_time - _last_availability_request_time < _availability_cache_ttl and
-        not any([date_from, date_to, goods_id]) and  # Не используем кэш при фильтрации
+        not any([date_from, date_to, goods_id, include_past]) and  # Не используем кэш при фильтрации
         skip == 0 and limit == 500):  # Не используем кэш при нестандартных параметрах
         logger.info("Возвращаем кэшированные данные о доступности")
         return _availability_cache
     
-    logger.info(f"Запрос списка доступности с параметрами: skip={skip}, limit={limit}, date_from={date_from}, date_to={date_to}, goods_id={goods_id}")
+    logger.info(f"Запрос списка доступности с параметрами: skip={skip}, limit={limit}, date_from={date_from}, date_to={date_to}, goods_id={goods_id}, include_past={include_past}")
     
     # Обновляем время последнего запроса
     _last_availability_request_time = current_time
@@ -1103,7 +1119,13 @@ async def read_all_availability(
     # Создаем базовый запрос
     query = select(DailyAvailability)
     
-    # Применяем фильтры
+    # По умолчанию показываем только начиная с сегодняшнего дня (если не указано иное)
+    if not include_past and not date_from:
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        query = query.filter(DailyAvailability.date >= today)
+        logger.info(f"Применен фильтр по умолчанию: дата >= {today}")
+    
+    # Применяем остальные фильтры
     if date_from:
         query = query.filter(DailyAvailability.date >= date_from)
     if date_to:
@@ -1111,11 +1133,17 @@ async def read_all_availability(
     if goods_id:
         query = query.filter(DailyAvailability.goods_id == goods_id)
     
-    # Сортировка и пагинация
-    query = query.order_by(DailyAvailability.date.desc()).offset(skip).limit(limit)
+    # Сортировка по возрастанию даты (сначала ближайшие даты) и пагинация
+    query = query.order_by(DailyAvailability.date.asc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
     availability_list = result.scalars().all()
+    
+    logger.info(f"Найдено записей доступности: {len(availability_list)}")
+    if availability_list:
+        first_date = availability_list[0].date
+        last_date = availability_list[-1].date
+        logger.info(f"Диапазон дат в результате: с {first_date} по {last_date}")
     
     # Получаем информацию о товарах для отображения названий
     goods_ids = [item.goods_id for item in availability_list]
@@ -1139,7 +1167,7 @@ async def read_all_availability(
         response_list.append(availability_dict)
     
     # Обновляем кэш, если это стандартный запрос без фильтров
-    if not any([date_from, date_to, goods_id]) and skip == 0 and limit == 500:
+    if not any([date_from, date_to, goods_id, include_past]) and skip == 0 and limit == 500:
         _availability_cache = response_list
     
     return response_list

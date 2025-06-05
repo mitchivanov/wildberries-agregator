@@ -407,6 +407,12 @@ async def cmd_admin(message: types.Message):
                         text="Управление рассылками 📝",
                         callback_data="manage_broadcasts"
                     )
+                ],
+                [
+                    types.InlineKeyboardButton(
+                        text="🗑️ Удалить последнюю рассылку",
+                        callback_data="delete_last_broadcast"
+                    )
                 ]
             ]
         )
@@ -576,6 +582,9 @@ async def send_broadcast(broadcast_id: int):
     broadcast["status"] = "in_progress"
     broadcast["started_at"] = datetime.now(MOSCOW_TZ)
     
+    # Инициализируем список для хранения message_id
+    broadcast["sent_messages"] = []
+    
     # Получаем всех активных пользователей
     users = await get_active_users()
     
@@ -591,20 +600,29 @@ async def send_broadcast(broadcast_id: int):
             
             # Пропускаем неактивных пользователей (можно добавить логику)
             
-            # Отправляем сообщение
+            # Отправляем сообщение и сохраняем message_id
+            sent_message = None
             if broadcast["photo_file_id"]:
-                await bot.send_photo(
+                sent_message = await bot.send_photo(
                     chat_id=user_id,
                     photo=broadcast["photo_file_id"],
                     caption=broadcast["message_text"],
                     parse_mode=ParseMode.HTML
                 )
             else:
-                await bot.send_message(
+                sent_message = await bot.send_message(
                     chat_id=user_id,
                     text=broadcast["message_text"],
                     parse_mode=ParseMode.HTML
                 )
+            
+            # Сохраняем информацию об отправленном сообщении
+            if sent_message:
+                broadcast["sent_messages"].append({
+                    "user_id": user_id,
+                    "message_id": sent_message.message_id,
+                    "sent_at": datetime.now(MOSCOW_TZ).isoformat()
+                })
             
             successful_sends += 1
             
@@ -632,6 +650,82 @@ async def send_broadcast(broadcast_id: int):
     save_broadcasts()
     
     logger.info(f"Рассылка {broadcast_id} завершена. Успешно: {successful_sends}, Ошибки: {failed_sends}, Блокировки: {blocked_users}")
+
+async def delete_last_broadcast():
+    """Удаление последней отправленной рассылки у всех пользователей"""
+    if not scheduled_broadcasts:
+        return {"status": "error", "message": "Нет рассылок для удаления"}
+    
+    # Находим последнюю завершенную рассылку
+    completed_broadcasts = [b for b in scheduled_broadcasts if b["status"] == "completed" and b.get("sent_messages")]
+    
+    if not completed_broadcasts:
+        return {"status": "error", "message": "Нет завершенных рассылок с сохраненными сообщениями"}
+    
+    # Сортируем по времени завершения и берем последнюю
+    completed_broadcasts.sort(key=lambda b: b.get("completed_at", datetime.min.replace(tzinfo=MOSCOW_TZ)), reverse=True)
+    last_broadcast = completed_broadcasts[0]
+    
+    # Проверяем, что рассылка не старше 48 часов (ограничение Telegram API)
+    completed_at = last_broadcast.get("completed_at")
+    if completed_at and isinstance(completed_at, str):
+        completed_at = datetime.fromisoformat(completed_at)
+    
+    if completed_at and (datetime.now(MOSCOW_TZ) - completed_at > timedelta(hours=48)):
+        return {"status": "error", "message": "Рассылка старше 48 часов, удаление невозможно"}
+    
+    # Удаляем сообщения у всех пользователей
+    deleted_count = 0
+    failed_count = 0
+    sent_messages = last_broadcast.get("sent_messages", [])
+    
+    logger.info(f"Начинаем удаление рассылки ID {last_broadcast['id']} у {len(sent_messages)} пользователей")
+    
+    for message_info in sent_messages:
+        try:
+            user_id = message_info["user_id"]
+            message_id = message_info["message_id"]
+            
+            await bot.delete_message(
+                chat_id=user_id,
+                message_id=message_id
+            )
+            deleted_count += 1
+            
+            # Небольшая задержка для избежания rate limits
+            await asyncio.sleep(0.05)
+            
+        except TelegramForbiddenError:
+            logger.warning(f"Пользователь {user_id} заблокировал бота, удаление невозможно")
+            failed_count += 1
+        except TelegramBadRequest as e:
+            logger.warning(f"Не удалось удалить сообщение у пользователя {user_id}: {e}")
+            failed_count += 1
+        except Exception as e:
+            logger.error(f"Ошибка при удалении сообщения у пользователя {user_id}: {e}")
+            failed_count += 1
+    
+    # Помечаем рассылку как удаленную
+    last_broadcast["status"] = "deleted"
+    last_broadcast["deleted_at"] = datetime.now(MOSCOW_TZ)
+    last_broadcast["deletion_stats"] = {
+        "deleted_count": deleted_count,
+        "failed_count": failed_count,
+        "total_messages": len(sent_messages)
+    }
+    
+    # Сохраняем изменения
+    save_broadcasts()
+    
+    logger.info(f"Удаление рассылки завершено. Удалено: {deleted_count}, Ошибок: {failed_count}")
+    
+    return {
+        "status": "success",
+        "message": f"Рассылка удалена. Удалено сообщений: {deleted_count}, Ошибок: {failed_count}",
+        "broadcast_id": last_broadcast["id"],
+        "deleted_count": deleted_count,
+        "failed_count": failed_count
+    }
 
 async def update_user_block_status(user_id: int, is_blocked: bool):
     # Реализация функции для обновления статуса блокировки пользователя в CSV файле
@@ -796,6 +890,127 @@ async def delete_broadcast_handler(callback: types.CallbackQuery):
         await callback.answer("Рассылка не найдена или уже выполнена.", show_alert=True)
         await manage_broadcasts_handler(callback)
 
+# Обработчик кнопки удаления последней рассылки
+@dp.callback_query(F.data == "delete_last_broadcast")
+async def delete_last_broadcast_handler(callback: types.CallbackQuery):
+    if str(callback.from_user.id) not in SUPER_ADMIN_IDS:
+        await callback.answer("Доступ запрещён!", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    # Показываем предупреждение и запрашиваем подтверждение
+    await callback.message.edit_text(
+        "⚠️ <b>ВНИМАНИЕ!</b>\n\n"
+        "Вы собираетесь удалить последнюю отправленную рассылку у ВСЕХ пользователей.\n\n"
+        "<b>Это действие необратимо!</b>\n\n"
+        "Удаление возможно только для рассылок не старше 48 часов.\n\n"
+        "Подтвердите удаление:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    types.InlineKeyboardButton(
+                        text="✅ Да, удалить рассылку",
+                        callback_data="confirm_delete_last_broadcast"
+                    )
+                ],
+                [
+                    types.InlineKeyboardButton(
+                        text="❌ Отмена",
+                        callback_data="back_to_admin"
+                    )
+                ]
+            ]
+        )
+    )
+
+# Обработчик подтверждения удаления последней рассылки
+@dp.callback_query(F.data == "confirm_delete_last_broadcast")
+async def confirm_delete_last_broadcast_handler(callback: types.CallbackQuery):
+    if str(callback.from_user.id) not in SUPER_ADMIN_IDS:
+        await callback.answer("Доступ запрещён!", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    # Показываем индикатор загрузки
+    await callback.message.edit_text(
+        "🔄 Удаляем последнюю рассылку...\n\n"
+        "Это может занять некоторое время.",
+        parse_mode=ParseMode.HTML
+    )
+    
+    try:
+        # Выполняем удаление
+        result = await delete_last_broadcast()
+        
+        if result["status"] == "success":
+            # Успешное удаление
+            await callback.message.edit_text(
+                f"✅ <b>Рассылка успешно удалена!</b>\n\n"
+                f"<b>ID рассылки:</b> {result['broadcast_id']}\n"
+                f"<b>Удалено сообщений:</b> {result['deleted_count']}\n"
+                f"<b>Ошибок удаления:</b> {result['failed_count']}\n\n"
+                f"📊 Статистика операции:\n"
+                f"• Успешно удалено: {result['deleted_count']}\n"
+                f"• Ошибки (заблокированные боты, устаревшие сообщения): {result['failed_count']}\n\n"
+                f"Рассылка помечена как удаленная в системе.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=types.InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            types.InlineKeyboardButton(
+                                text="◀️ Назад в админку",
+                                callback_data="back_to_admin"
+                            )
+                        ]
+                    ]
+                )
+            )
+        else:
+            # Ошибка при удалении
+            await callback.message.edit_text(
+                f"❌ <b>Не удалось удалить рассылку</b>\n\n"
+                f"<b>Причина:</b> {result['message']}\n\n"
+                f"<b>Возможные причины:</b>\n"
+                f"• Нет завершенных рассылок для удаления\n"
+                f"• Последняя рассылка старше 48 часов (ограничение Telegram API)\n"
+                f"• Все сообщения уже удалены\n\n"
+                f"Используйте /admin для управления рассылками.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=types.InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            types.InlineKeyboardButton(
+                                text="◀️ Назад в админку",
+                                callback_data="back_to_admin"
+                            )
+                        ]
+                    ]
+                )
+            )
+    
+    except Exception as e:
+        logger.error(f"Критическая ошибка при выполнении команды delete_last_broadcast: {e}")
+        await callback.message.edit_text(
+            f"💥 <b>Критическая ошибка!</b>\n\n"
+            f"Произошла неожиданная ошибка при удалении рассылки.\n"
+            f"Подробности записаны в логи.\n\n"
+            f"Свяжитесь с разработчиком для диагностики.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=types.InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        types.InlineKeyboardButton(
+                            text="◀️ Назад в админку",
+                            callback_data="back_to_admin"
+                        )
+                    ]
+                ]
+            )
+        )
+
 # Обработчик кнопки "Назад" в меню рассылок
 @dp.callback_query(F.data == "back_to_admin")
 async def back_to_admin_handler(callback: types.CallbackQuery):
@@ -822,6 +1037,12 @@ async def back_to_admin_handler(callback: types.CallbackQuery):
             types.InlineKeyboardButton(
                 text="Управление рассылками 📝",
                 callback_data="manage_broadcasts"
+            )
+        ],
+        [
+            types.InlineKeyboardButton(
+                text="🗑️ Удалить последнюю рассылку",
+                callback_data="delete_last_broadcast"
             )
         ]
     ]
@@ -1278,11 +1499,58 @@ async def close_reservations_handler(callback: types.CallbackQuery):
     
 @dp.message(Command("help"))
 async def help_command(message: types.Message):
-    await message.answer("""
-    /start - Начало работы
-    /reservations - Список бронирований
-    /categories - Список категорий
-    """)
+    await message.answer(
+        "Доступные команды:\n"
+        "/start - Начать работу с ботом\n"
+        "/shop - Открыть каталог товаров\n"
+        "/reservations - Управление бронированиями\n"
+        "/help - Показать эту справку"
+    )
+
+@dp.message(Command("delete_last_broadcast"))
+async def cmd_delete_last_broadcast(message: types.Message):
+    """Команда для прямого удаления последней рассылки"""
+    if str(message.from_user.id) not in SUPER_ADMIN_IDS:
+        return await message.answer("⛔ Доступ запрещён! Только для администраторов.")
+    
+    await message.answer("🔄 Анализирую последнюю рассылку...")
+    
+    try:
+        result = await delete_last_broadcast()
+        
+        if result["status"] == "success":
+            await message.answer(
+                f"✅ <b>Последняя рассылка успешно удалена!</b>\n\n"
+                f"<b>ID рассылки:</b> {result['broadcast_id']}\n"
+                f"<b>Удалено сообщений:</b> {result['deleted_count']}\n"
+                f"<b>Ошибок удаления:</b> {result['failed_count']}\n\n"
+                f"📊 Статистика операции:\n"
+                f"• Успешно удалено: {result['deleted_count']}\n"
+                f"• Ошибки (заблокированные боты, устаревшие сообщения): {result['failed_count']}\n\n"
+                f"Рассылка помечена как удаленная в системе.",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await message.answer(
+                f"❌ <b>Не удалось удалить рассылку</b>\n\n"
+                f"<b>Причина:</b> {result['message']}\n\n"
+                f"<b>Возможные причины:</b>\n"
+                f"• Нет завершенных рассылок для удаления\n"
+                f"• Последняя рассылка старше 48 часов (ограничение Telegram API)\n"
+                f"• Все сообщения уже удалены\n\n"
+                f"Используйте /admin для управления рассылками.",
+                parse_mode=ParseMode.HTML
+            )
+    
+    except Exception as e:
+        logger.error(f"Критическая ошибка при выполнении команды delete_last_broadcast: {e}")
+        await message.answer(
+            f"💥 <b>Критическая ошибка!</b>\n\n"
+            f"Произошла неожиданная ошибка при удалении рассылки.\n"
+            f"Подробности записаны в логи.\n\n"
+            f"Свяжитесь с разработчиком для диагностики.",
+            parse_mode=ParseMode.HTML
+        )
 
 @dp.callback_query(F.data.startswith("cancel_reservation_"))
 async def cancel_reservation_handler(callback: types.CallbackQuery):

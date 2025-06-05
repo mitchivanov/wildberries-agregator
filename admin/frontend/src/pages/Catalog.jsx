@@ -6,7 +6,7 @@ import SearchBar from '../components/SearchBar';
 import toast from 'react-hot-toast';
 
 const Catalog = () => {
-  const { getGoods, searchGoods, maskArticle, getCategories, getUserDailyReservationsCount } = useApi();
+  const { getCatalog, searchGoods, maskArticle, getCategories, getUserDailyReservationsCount } = useApi();
   const { isDarkMode, webApp, user } = useTelegram();
   const [goods, setGoods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -90,8 +90,8 @@ const Catalog = () => {
       // Показываем уведомление о загрузке
       const loadingToast = toast.loading('Загружаем товары, пожалуйста, подождите...');
       
-      // Передаем параметры сортировки в API запрос
-      const data = await getGoods({
+      // Используем getCatalog для получения только доступных товаров
+      const data = await getCatalog({
         sortBy,
         sortOrder
       });
@@ -99,20 +99,15 @@ const Catalog = () => {
       // Закрываем уведомление о загрузке
       toast.dismiss(loadingToast);
       
-      let availableGoods = [];
-      if (Array.isArray(data)) {
-        availableGoods = data.filter(item => item.is_active && !item.is_hidden);
-      } else if (data && Array.isArray(data.items)) {
-        availableGoods = data.items.filter(item => item.is_active && !item.is_hidden);
-      }
-      setGoods(availableGoods);
+      // getCatalog уже возвращает отфильтрованные товары
+      setGoods(data);
       
-      // Получаем данные о доступности для всех доступных товаров на сегодня
+      // Получаем данные о доступности для всех товаров на сегодня
       const today = new Date().toISOString().split('T')[0];
       const availabilityMap = {};
       
-      if (Array.isArray(availableGoods) && availableGoods.length > 0) {
-        availableGoods.forEach(item => {
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach(item => {
           if (Array.isArray(item.daily_availability) && item.daily_availability.length > 0) {
             const todayAvailability = item.daily_availability.find(av => 
               av.date && av.date.split('T')[0] === today
@@ -124,10 +119,8 @@ const Catalog = () => {
         });
         
         setAvailabilityData(availabilityMap);
-        
-        if (((Array.isArray(data) && data.length > 0) || (data && Array.isArray(data.items) && data.items.length > 0)) && availableGoods.length === 0) {
-          toast.info('В настоящее время нет доступных товаров');
-        }
+      } else {
+        toast.info('В настоящее время нет доступных товаров');
       }
       
       // Отмечаем, что первая загрузка завершена

@@ -18,14 +18,30 @@ const AllAvailability = () => {
   const fetchAvailability = useCallback(async () => {
     try {
       setLoading(true);
+      console.log('📱 AllAvailability: Начинаем загрузку данных');
       const data = await getAllAvailability();
+      console.log('📱 AllAvailability: Получены данные от API:', data);
+      console.log('📱 AllAvailability: Количество записей:', data?.length || 0);
+      
+      if (data && data.length > 0) {
+        console.log('📱 AllAvailability: Первая запись:', data[0]);
+        console.log('📱 AllAvailability: Последняя запись:', data[data.length - 1]);
+        
+        // Анализируем диапазон дат
+        const dates = data.map(item => item.date).filter(Boolean);
+        if (dates.length > 0) {
+          const sortedDates = dates.sort();
+          console.log('📱 AllAvailability: Диапазон дат от', sortedDates[0], 'до', sortedDates[sortedDates.length - 1]);
+        }
+      }
+      
       setAvailabilityData(data || []);
       
       // Автоматически раскрываем сегодняшний день
       const today = new Date().toISOString().split('T')[0];
       setExpandedDays(new Set([today]));
     } catch (error) {
-      console.error('Ошибка при загрузке данных:', error);
+      console.error('📱 AllAvailability: Ошибка при загрузке данных:', error);
       toast.error(`Ошибка при загрузке данных: ${error.message}`);
     } finally {
       setLoading(false);
@@ -41,6 +57,9 @@ const AllAvailability = () => {
   const groupedByDays = useMemo(() => {
     if (!availabilityData || availabilityData.length === 0) return [];
     
+    console.log('🗓️ Начинаем группировку данных по дням');
+    console.log('🗓️ Входящие данные:', availabilityData.length, 'записей');
+    
     // Фильтруем по поисковому запросу
     const filteredData = searchQuery
       ? availabilityData.filter(item => 
@@ -49,28 +68,32 @@ const AllAvailability = () => {
         )
       : availabilityData;
     
+    console.log('🔍 После фильтрации по поиску:', filteredData.length, 'записей');
+    
     // Группируем по датам
     const groups = {};
     filteredData.forEach(item => {
-      const date = new Date(item.date);
-      const dateKey = date.toISOString().split('T')[0];
-      
-      if (!groups[dateKey]) {
-        groups[dateKey] = {
-          date: dateKey,
-          dateObject: date,
-          items: []
-        };
+      try {
+        const date = new Date(item.date);
+        const dateKey = date.toISOString().split('T')[0];
+        
+        if (!groups[dateKey]) {
+          groups[dateKey] = {
+            date: dateKey,
+            dateObject: date,
+            items: []
+          };
+        }
+        groups[dateKey].items.push(item);
+      } catch (dateError) {
+        console.error('🗓️ Ошибка при парсинге даты:', item.date, dateError);
       }
-      groups[dateKey].items.push(item);
     });
     
-    // Сортируем дни по дате (начиная с сегодняшнего)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    console.log('📊 Сгруппировано по дням:', Object.keys(groups).length, 'дней');
     
+    // Возвращаем все группы, отсортированные по дате (бэкенд уже фильтрует по датам >= сегодня)
     return Object.values(groups)
-      .filter(group => group.dateObject >= today) // Показываем только с сегодняшнего дня
       .sort((a, b) => a.dateObject - b.dateObject)
       .map(group => ({
         ...group,
