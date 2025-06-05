@@ -681,7 +681,6 @@ async def get_catalog(
         if current_date is None:
             current_date = datetime.now()
         await clean_expired_availability(db)
-        today = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
         query = select(Goods).options(
             selectinload(Goods.daily_availability),
             selectinload(Goods.category),
@@ -694,71 +693,7 @@ async def get_catalog(
         )
         result = await db.execute(query)
         goods = result.scalars().all()
-
-        response = []
-        for g in goods:
-            # Найти доступность на сегодня
-            today_av = None
-            for av in getattr(g, 'daily_availability', []):
-                if av.date and av.date.replace(hour=0, minute=0, second=0, microsecond=0) == today:
-                    today_av = av
-                    break
-            # Список доступностей для ответа
-            daily_availability = [
-                {
-                    "id": av.id,
-                    "goods_id": av.goods_id,
-                    "date": av.date,
-                    "available_quantity": av.available_quantity
-                } for av in getattr(g, 'daily_availability', [])
-            ]
-            # Если нет доступности на сегодня — добавляем фиктивную
-            if not today_av:
-                daily_availability.append({
-                    "id": None,
-                    "goods_id": g.id,
-                    "date": today,
-                    "available_quantity": 0
-                })
-            # Собираем словарь для ответа
-            goods_dict = {
-                "id": g.id,
-                "name": g.name,
-                "price": g.price,
-                "cashback_percent": g.cashback_percent,
-                "article": g.article,
-                "url": g.url,
-                "image": g.image,
-                "is_active": g.is_active,
-                "is_hidden": g.is_hidden,
-                "purchase_guide": g.purchase_guide,
-                "start_date": g.start_date,
-                "end_date": g.end_date,
-                "min_daily": g.min_daily,
-                "max_daily": g.max_daily,
-                "created_at": g.created_at,
-                "updated_at": g.updated_at,
-                "daily_availability": daily_availability,
-                "reservations": [
-                    {
-                        "id": r.id,
-                        "user_id": r.user_id,
-                        "goods_id": r.goods_id,
-                        "quantity": r.quantity,
-                        "reserved_at": r.reserved_at
-                    } for r in getattr(g, 'reservations', [])
-                ],
-                "category": {
-                    "id": g.category.id,
-                    "name": g.category.name,
-                    "description": g.category.description,
-                    "is_active": g.category.is_active,
-                    "created_at": g.category.created_at,
-                    "updated_at": g.category.updated_at
-                } if g.category else None
-            }
-            response.append(goods_dict)
-        return response
+        return goods
     except Exception as e:
         logger.error(f"Ошибка при получении каталога: {str(e)}")
         raise HTTPException(
