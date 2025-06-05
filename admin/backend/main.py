@@ -677,42 +677,43 @@ async def get_catalog(
     current_date: Optional[datetime] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Получить список доступных товаров на текущую дату"""
+    """Получить список всех активных и видимых товаров на сегодня (без лимитов и фильтрации по доступности)"""
     try:
         if current_date is None:
             current_date = datetime.now()
-        
-        # Автоматически очищаем устаревшие записи
         await clean_expired_availability(db)
-        
-        # Добавляем условие is_hidden=False и загрузку связанных данных
+        today = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
         query = select(Goods).options(
             selectinload(Goods.daily_availability),
             selectinload(Goods.category),
-            selectinload(Goods.reservations)  # Добавляем загрузку резерваций
+            selectinload(Goods.reservations)
         ).where(
             Goods.is_active == True,
             Goods.is_hidden == False,
             Goods.start_date <= current_date,
             Goods.end_date >= current_date
         )
-        
         result = await db.execute(query)
         goods = result.scalars().all()
-        
-        # Проверяем наличие доступных товаров на текущую дату
-        available_goods = []
-        for item in goods:
-            availability_query = select(DailyAvailability).where(
-                DailyAvailability.goods_id == item.id,
-                DailyAvailability.date == current_date.replace(hour=0, minute=0, second=0, microsecond=0),
-                DailyAvailability.available_quantity > 0
-            )
-            availability_result = await db.execute(availability_query)
-            if availability_result.scalars().first():
-                available_goods.append(item)
-        
-        return available_goods
+        # Гарантируем, что у каждого товара есть запись о доступности на сегодня (даже если 0)
+        for g in goods:
+            if not any(
+                av.date and av.date.replace(hour=0, minute=0, second=0, microsecond=0) == today
+                for av in getattr(g, 'daily_availability', [])
+            ):
+                # Добавляем фиктивную запись только в ответ (не в базу)
+                from types import SimpleNamespace
+                fake_av = SimpleNamespace(
+                    id=None,
+                    goods_id=g.id,
+                    date=today,
+                    available_quantity=0
+                )
+                if hasattr(g, 'daily_availability') and g.daily_availability is not None:
+                    g.daily_availability.append(fake_av)
+                else:
+                    g.daily_availability = [fake_av]
+        return goods
     except Exception as e:
         logger.error(f"Ошибка при получении каталога: {str(e)}")
         raise HTTPException(

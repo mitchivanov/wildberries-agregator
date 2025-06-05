@@ -529,6 +529,10 @@ export const useApi = () => {
     }
   }, []);
 
+  const getCatalog = useCallback(async () => {
+    return request('get', '/catalog/');
+  }, [request]);
+
   return {
     loading,
     error,
@@ -550,6 +554,7 @@ export const useApi = () => {
     updateCategory,
     bulkHideGoods,
     bulkShowGoods,
-    getUserDailyReservationsCount
+    getUserDailyReservationsCount,
+    getCatalog
   };
 }; 

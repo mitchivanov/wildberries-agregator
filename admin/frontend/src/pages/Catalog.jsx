@@ -6,7 +6,7 @@ import SearchBar from '../components/SearchBar';
 import toast from 'react-hot-toast';
 
 const Catalog = () => {
-  const { getGoods, searchGoods, maskArticle, getCategories, getUserDailyReservationsCount } = useApi();
+  const { getCatalog, searchGoods, maskArticle, getCategories, getUserDailyReservationsCount } = useApi();
   const { isDarkMode, webApp, user } = useTelegram();
   const [goods, setGoods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -71,19 +71,14 @@ const Catalog = () => {
     setLoading(true);
     setIsSearching(false);
     try {
-      // Показываем уведомление о загрузке
       const loadingToast = toast.loading('Загружаем товары, пожалуйста, подождите...');
-      
-      const data = await getGoods();
-      
-      // Закрываем уведомление о загрузке
+      const data = await getCatalog();
       toast.dismiss(loadingToast);
-      
       let availableGoods = [];
       if (Array.isArray(data)) {
-        availableGoods = data.filter(item => item.is_active && !item.is_hidden);
+        availableGoods = data;
       } else if (data && Array.isArray(data.items)) {
-        availableGoods = data.items.filter(item => item.is_active && !item.is_hidden);
+        availableGoods = data.items;
       }
       setGoods(availableGoods);
       
